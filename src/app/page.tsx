@@ -1,4 +1,5 @@
 import Image from "next/image";
+import ModelDownloader from "@/components/ModelDownloader/ModelDownloader";
 
 export default function Home() {
   return (
@@ -49,6 +50,10 @@ export default function Home() {
           >
             Read our docs
           </a>
+        </div>
+        {/* Add Model Downloader Component */}
+        <div className="mt-8 w-full max-w-2xl">
+          <ModelDownloader />
         </div>
       </main>
       <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
