@@ -111,6 +111,7 @@ dependencies = [
  "log",
  "once_cell",
  "reqwest",
+ "scopeguard",
  "serde",
  "serde_json",
  "tar",
@@ -121,6 +122,7 @@ dependencies = [
  "tauri-plugin-log",
  "tauri-plugin-shell",
  "tokio",
+ "uuid",
  "zip",
  "zstd",
 ]

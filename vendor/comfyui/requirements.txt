@@ -14,6 +14,8 @@ Pillow
 scipy
 tqdm
 psutil
+torchsde
+comfyui-workflow-templates
 
 #non essential dependencies:
 kornia>=0.7.1

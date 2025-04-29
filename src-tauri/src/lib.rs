@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::prelude::*; // Import prelude for write_all
 use std::env;
 use tauri::{AppHandle, Manager, Wry};
 use tauri::async_runtime::{self};
@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use log::{info, error};
 use tauri_plugin_shell::ShellExt; // Import ShellExt for sidecar spawning
 use tauri_plugin_shell::process::{CommandChild, CommandEvent}; // Import Command, CommandChild, and CommandEvent from shell plugin
+use uuid::Uuid; // Import Uuid for generating unique filenames
+use scopeguard; // Import scopeguard for the cleanup guard
 
 // Global static variable to hold the child process handle
 static COMFYUI_CHILD_PROCESS: Lazy<Mutex<Option<CommandChild>>> = Lazy::new(|| Mutex::new(None));
@@ -70,6 +72,16 @@ fn install_python_dependencies(app_handle: &AppHandle<Wry>) -> Result<(), Box<dy
             .current_dir(&comfyui_dir) // Run venv creation from comfyui_dir
             .output()?;
 
+        // Write stdout to a temporary file
+        let mut stdout_file = fs::File::create(env::temp_dir().join("venv_stdout.log"))?;
+        stdout_file.write_all(&create_venv_output.stdout)?;
+        info!("Venv stdout written to: {}", env::temp_dir().join("venv_stdout.log").display());
+
+        // Write stderr to a temporary file
+        let mut stderr_file = fs::File::create(env::temp_dir().join("venv_stderr.log"))?;
+        stderr_file.write_all(&create_venv_output.stderr)?;
+        error!("Venv stderr written to: {}", env::temp_dir().join("venv_stderr.log").display());
+
         info!("Create venv stdout:\n---");
         info!("{}", String::from_utf8_lossy(&create_venv_output.stdout));
         info!("---");
@@ -88,50 +100,156 @@ fn install_python_dependencies(app_handle: &AppHandle<Wry>) -> Result<(), Box<dy
 
     // 2. Install dependencies into the virtual environment
     info!("Installing Python dependencies into virtual environment...");
-    let mut pip_args: Vec<String> = vec![
-        "-m".to_string(), "pip".to_string(), "install".to_string(),
+
+    // Detect CUDA GPU to determine which torch version to install
+    let cuda_gpu_detected = detect_cuda_gpu();
+    info!("CUDA GPU detected: {}", cuda_gpu_detected);
+
+    // Define the Python script content
+    let python_script_content = r#"
+import csv
+import sys
+import subprocess
+
+# Set the CSV field size limit
+csv.field_size_limit(2147483647)
+
+# Execute the pip command with the received arguments
+# sys.argv[1:] contains the arguments passed after the script name
+# We need to exclude the first argument which is the script name itself
+subprocess.run([sys.executable, "-m", "pip"] + sys.argv[1:], check=True)
+"#;
+
+    // Generate a unique temporary file path
+    let temp_dir = env::temp_dir();
+    let script_filename = format!("install_pip_{}.py", Uuid::new_v4());
+    let temp_script_path = temp_dir.join(script_filename);
+
+    // Write the Python script to the temporary file
+    if let Err(e) = write_temp_python_script(python_script_content, &temp_script_path) {
+        error!("Failed to write temporary Python script: {}", e);
+        return Err("Failed to write temporary Python script".into());
+    }
+
+    // Ensure the temporary file is cleaned up later
+    let temp_script_path_clone = temp_script_path.clone();
+    let _cleanup = scopeguard::guard(temp_script_path_clone, |path| {
+        if let Err(e) = fs::remove_file(&path) {
+            error!("Failed to delete temporary Python script {}: {}", path.display(), e);
+        } else {
+            info!("Successfully deleted temporary Python script: {}", path.display());
+        }
+    });
+
+
+    // 2a. Install non-torch dependencies from requirements.txt using default index
+    let non_torch_dependencies: Vec<String> = requirements_content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty() && !trimmed.starts_with('#') &&
+            trimmed != "torch" &&
+            trimmed != "torchvision" &&
+            trimmed != "torchaudio"
+        })
+        .map(|line| line.trim().to_string())
+        .collect();
+
+    if !non_torch_dependencies.is_empty() {
+        let mut pip_args_non_torch: Vec<String> = vec![
+            "install".to_string(), // Removed "-m", "pip"
+            "--no-cache-dir".to_string(),
+            "--verbose".to_string(),
+            "--upgrade".to_string(),
+            "--force-reinstall".to_string(), // Add this to ensure a clean installation
+        ];
+        pip_args_non_torch.extend(non_torch_dependencies);
+
+        let script_args_non_torch: Vec<String> = vec![temp_script_path.to_string_lossy().into_owned()]
+            .into_iter()
+            .chain(pip_args_non_torch.into_iter())
+            .collect();
+
+        let script_args_non_torch_refs: Vec<&str> = script_args_non_torch.iter().map(|s| s.as_str()).collect();
+
+        info!("Executing pip install for non-torch dependencies using temporary script: {:?} {:?}", &venv_python_executable, script_args_non_torch_refs);
+
+        // Execute the temporary Python script with the virtual environment's Python
+        let install_output_non_torch = std::process::Command::new(&venv_python_executable)
+            .current_dir(&comfyui_dir) // Run from comfyui_dir
+            .args(&script_args_non_torch_refs)
+            .output()?;
+
+        info!("Pip install (non-torch) stdout:\n---");
+        info!("{}", String::from_utf8_lossy(&install_output_non_torch.stdout));
+        info!("---");
+        info!("Pip install (non-torch) stderr:\n---");
+        error!("{}", String::from_utf8_lossy(&install_output_non_torch.stderr)); // Log stderr as error
+        info!("---");
+
+        if !install_output_non_torch.status.success() {
+            error!("Pip install (non-torch) command failed with status: {:?}", install_output_non_torch.status);
+            return Err(format!("Pip install (non-torch) failed with status: {:?}", install_output_non_torch.status).into());
+        }
+        info!("Successfully installed non-torch Python dependencies.");
+    } else {
+        info!("No non-torch dependencies to install.");
+    }
+
+    // 2b. Install torch, torchvision, and torchaudio using the appropriate index
+    let mut pip_args_torch: Vec<String> = vec![
+        "install".to_string(), // Removed "-m", "pip"
         "--no-cache-dir".to_string(),
         "--verbose".to_string(),
         "--upgrade".to_string(),
         "--force-reinstall".to_string(), // Add this to ensure a clean installation
     ];
 
-    // Add dependencies from requirements.txt
-    let dependencies: Vec<String> = requirements_content
-        .lines()
-        .filter(|line| !line.trim().is_empty() && !line.trim().starts_with('#'))
-        .map(|line| line.trim().to_string())
+    if cuda_gpu_detected {
+        // Use the index URL for CUDA 12.1 wheels (compatible with Python 3.12 and likely 12.4)
+        info!("Adding CUDA-enabled torch, torchvision, torchaudio with index URL.");
+        pip_args_torch.push("--index-url".to_string());
+        pip_args_torch.push("https://download.pytorch.org/whl/cu121".to_string());
+        pip_args_torch.push("torch".to_string());
+        pip_args_torch.push("torchvision".to_string());
+        pip_args_torch.push("torchaudio".to_string());
+    } else {
+        info!("Adding CPU-only torch, torchvision, torchaudio.");
+        pip_args_torch.push("torch".to_string());
+        pip_args_torch.push("torchvision".to_string());
+        pip_args_torch.push("torchaudio".to_string());
+        pip_args_torch.push("--index-url".to_string()); // Specify default index for CPU
+        pip_args_torch.push("https://pypi.org/simple".to_string());
+    }
+
+    let script_args_torch: Vec<String> = vec![temp_script_path.to_string_lossy().into_owned()]
+        .into_iter()
+        .chain(pip_args_torch.into_iter())
         .collect();
 
-    for dep in dependencies {
-        pip_args.push(dep); // Push owned String
-    }
+    let script_args_torch_refs: Vec<&str> = script_args_torch.iter().map(|s| s.as_str()).collect();
 
-    // Add the index URL for CUDA 12.4 wheels (compatible with Python 3.12)
+    info!("Executing pip install for torch dependencies using temporary script: {:?} {:?}", &venv_python_executable, script_args_torch_refs);
 
-    // Convert pip_args to Vec<&str> for the command execution
-    let pip_args_refs: Vec<&str> = pip_args.iter().map(|s| s.as_str()).collect();
-
-    info!("Executing pip install command in venv: {:?} {:?}", &venv_python_executable, pip_args_refs);
-
-    let install_output = std::process::Command::new(&venv_python_executable)
-        .current_dir(&comfyui_dir) // Run pip install from comfyui_dir
-        .args(&pip_args_refs)
+    // Execute the temporary Python script with the virtual environment's Python
+    let install_output_torch = std::process::Command::new(&venv_python_executable)
+        .current_dir(&comfyui_dir) // Run from comfyui_dir
+        .args(&script_args_torch_refs)
         .output()?;
 
-    info!("Pip install stdout:\n---");
-    info!("{}", String::from_utf8_lossy(&install_output.stdout));
+    info!("Pip install (torch) stdout:\n---");
+    info!("{}", String::from_utf8_lossy(&install_output_torch.stdout));
     info!("---");
-    info!("Pip install stderr:\n---");
-    error!("{}", String::from_utf8_lossy(&install_output.stderr)); // Log stderr as error
+    info!("Pip install (torch) stderr:\n---");
+    error!("{}", String::from_utf8_lossy(&install_output_torch.stderr)); // Log stderr as error
     info!("---");
 
-    if !install_output.status.success() {
-        error!("Pip install command failed with status: {:?}", install_output.status);
-        return Err("Pip install failed".into());
+    if !install_output_torch.status.success() {
+        error!("Pip install (torch) command failed with status: {:?}", install_output_torch.status);
+        return Err(format!("Pip install (torch) failed with status: {:?}", install_output_torch.status).into());
     }
 
-    info!("Successfully installed Python dependencies.");
+    info!("Successfully installed torch Python dependencies.");
 
     // Set a flag indicating dependencies are installed by creating a marker file
     info!("Creating dependency installed marker file: {}", marker_file_path.display());
@@ -186,6 +304,15 @@ fn detect_cuda_gpu() -> bool {
             false // Default to CPU mode if nvidia-smi is not found or fails to execute
         }
     }
+}
+
+// Function to write the temporary Python script
+fn write_temp_python_script(content: &str, file_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Writing temporary Python script to: {}", file_path.display());
+    let mut file = fs::File::create(file_path)?;
+    file.write_all(content.as_bytes())?;
+    info!("Temporary Python script written successfully.");
+    Ok(())
 }
 
 // Function to start the sidecar
@@ -278,18 +405,29 @@ fn start_comfyui_sidecar(app_handle: AppHandle<Wry>) {
 
         info!("ComfyUI args: {:?}", args);
 
-        info!("Spawning command:");
-        info!("  Executable: {}", venv_python_executable.to_string_lossy());
-        info!("  Args: {:?}", args);
-        info!("  Working Directory: {}", comfyui_dir.display());
+        // Log the final command being executed
+        let final_command = format!("{} {}", venv_python_executable.to_string_lossy(), args.join(" "));
+        info!("Final ComfyUI launch command: {}", final_command);
+        info!("Working Directory: {}", comfyui_dir.display());
 
-        let (mut rx, child) = app_handle.shell().command(venv_python_executable.to_string_lossy().to_string())
+        info!("Attempting to spawn ComfyUI process...");
+        let (mut rx, child) = match app_handle.shell().command(venv_python_executable.to_string_lossy().to_string())
             .args(args.clone())
             .current_dir(&comfyui_dir) // Pass as reference
-            .spawn()
-            .expect("Failed to spawn ComfyUI process");
-
-        info!("ComfyUI process started successfully (PID: {}).", child.pid());
+            .spawn() {
+                Ok((rx, child)) => {
+                    info!("ComfyUI process started successfully (PID: {}).", child.pid());
+                    info!("Successfully spawned ComfyUI process."); // Added log
+                    (rx, child)
+                },
+                Err(e) => {
+                    error!("Failed to spawn ComfyUI process: {}", e);
+                    error!("Spawn failed for ComfyUI process."); // Added log
+                    // Depending on the desired behavior, you might want to show an error to the user
+                    // or prevent the application from continuing. For now, we just log the error.
+                    return;
+                }
+            };
 
         // Asynchronous logging using CommandEvent
         async_runtime::spawn(async move {
@@ -313,6 +451,7 @@ fn start_comfyui_sidecar(app_handle: AppHandle<Wry>) {
 
         // Store the child handle
         *COMFYUI_CHILD_PROCESS.lock().unwrap() = Some(child);
+        info!("ComfyUI child process handle stored successfully."); // Added log
 
     });
 }
@@ -359,11 +498,11 @@ pub fn run() {
     .plugin(tauri_plugin_http::init()) // Register the HTTP plugin
     .on_window_event(|window, event| match event {
         tauri::WindowEvent::Destroyed => {
-             // Ensure this only runs for the main window if multiple windows exist
-             if window.label() == "main" { // Check label for main window
-                 info!("Main window destroyed, stopping ComfyUI sidecar...");
-                 stop_comfyui_sidecar();
-             }
+            // Ensure this only runs for the main window if multiple windows exist
+            if window.label() == "main" { // Check label for main window
+                info!("Main window destroyed, stopping ComfyUI sidecar...");
+                stop_comfyui_sidecar();
+            }
         }
         _ => {}
     })
