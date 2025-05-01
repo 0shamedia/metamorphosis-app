@@ -1,7 +1,36 @@
+"use client";
+
 import Image from "next/image";
+import { useState, useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
 import ModelDownloader from "@/components/ModelDownloader/ModelDownloader";
 
 export default function Home() {
+  const [status, setStatus] = useState("Idle");
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unlisten = listen("installation-status", (event) => {
+      const payload = event.payload as {
+        status: string;
+        progress?: number;
+        error?: string;
+      };
+      setStatus(payload.status);
+      if (payload.progress !== undefined) {
+        setProgress(payload.progress);
+      }
+      if (payload.error !== undefined) {
+        setError(payload.error);
+      }
+    });
+
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
+
   return (
     <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
       <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
@@ -25,6 +54,21 @@ export default function Home() {
             Save and see your changes instantly.
           </li>
         </ol>
+
+        {/* ComfyUI Setup Status */}
+        <div className="mt-8 w-full max-w-2xl">
+          <h2 className="text-xl font-semibold mb-4">ComfyUI Setup Status</h2>
+          <p>Status: {status}</p>
+          {progress > 0 && progress <= 100 && (
+            <p>Progress: {progress}%</p>
+          )}
+          {error && (
+            <div className="text-red-500">
+              <h3 className="font-semibold">Error:</h3>
+              <p>{error}</p>
+            </div>
+          )}
+        </div>
 
         <div className="flex gap-4 items-center flex-col sm:flex-row">
           <a
