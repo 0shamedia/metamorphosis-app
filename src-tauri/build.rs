@@ -6,7 +6,6 @@ use std::{
     path::{Path, PathBuf},
 };
 use std::io::Write; // Import the Write trait for write_all
-use dircpy::copy_dir; // Import dircpy
 
 
 use std::panic;
@@ -20,6 +19,28 @@ const PYTHON_RELEASE_TAG: &str = "20250409"; // Use latest valid release tag
 const BASE_URL: &str = "https://github.com/astral-sh/python-build-standalone/releases/download"; // Updated base URL to astral-sh repo
 const VENDOR_DIR: &str = "../vendor"; // Relative to src-tauri
 const PYTHON_INSTALL_DIR_NAME: &str = "python"; // Directory inside vendor where python will be extracted
+
+fn copy_recursively(source: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
+    // Create the destination directory if it doesn't exist
+    fs::create_dir_all(destination)?;
+
+    // Iterate over entries in the source directory
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        let entry_filename = entry_path.file_name().ok_or("Invalid file name")?;
+        let dest_path = destination.join(entry_filename);
+
+        if entry_path.is_dir() {
+            // If it's a directory, recursively call copy_recursively
+            copy_recursively(&entry_path, &dest_path)?;
+        } else {
+            // If it's a file, copy it
+            fs::copy(&entry_path, &dest_path)?;
+        }
+    }
+    Ok(())
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=build.rs");
@@ -96,6 +117,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // We need to go up 4 levels to reach target/<profile>/
     let target_profile_dir = out_dir.join("../../../../");
     let dest_vendor_path = target_profile_dir.join("vendor");
+    println!("DEBUG: Destination vendor path calculated by build.rs: {:?}", dest_vendor_path);
     
     // Get the absolute path of the source vendor directory using CARGO_MANIFEST_DIR
     let cargo_manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -119,18 +141,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Source vendor path (absolute): {:?}", &absolute_vendor_path);
     println!("Destination vendor path (absolute): {:?}", &dest_vendor_path);
 
-    // Use dircpy for recursive directory copying
-    println!("Using dircpy for recursive directory copying...");
+    // Use Rust-native recursive directory copying
+    println!("Using Rust-native recursive directory copying...");
+    copy_recursively(&absolute_vendor_path, &dest_vendor_path)?;
     
-    match copy_dir(&absolute_vendor_path, &dest_vendor_path) {
-        Ok(_) => {
-            println!("Successfully copied vendor directory using dircpy.");
-        }
-        Err(e) => {
-            eprintln!("Error copying vendor directory using dircpy: {}", e);
-            return Err(format!("dircpy failed: {}", e).into());
-        }
+
+
+    println!("BUILD_RS_TEST: Reached verification section.");
+
+    // --- Verify requirements.txt exists after copy ---
+    let requirements_dest_path = dest_vendor_path.join("comfyui/requirements.txt");
+    if requirements_dest_path.exists() {
+        println!("BUILD_RS_VERIFY: requirements.txt found at {:?}", requirements_dest_path);
+    } else {
+        println!("BUILD_RS_VERIFY: requirements.txt NOT found at {:?}", requirements_dest_path);
     }
+    // --- End verification ---
 
     // --- Tauri Build ---
     println!("Running Tauri build...");

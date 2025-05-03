@@ -1,4 +1,6 @@
-use tauri::{AppHandle, Wry};
+use std::path::PathBuf;
+use tauri::{AppHandle, Manager, Wry};
+use tauri::path::BaseDirectory;
 use tauri::async_runtime::{self};
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
@@ -26,6 +28,7 @@ pub fn start_comfyui_sidecar(app_handle: AppHandle<Wry>) {
             // or prevent the ComfyUI sidecar from starting. For now, we just log the error.
             return;
         }
+        info!("Python dependency installation check/process completed.");
 
         // Get the path to the directory containing the current executable
         let exe_path = match std::env::current_exe() {
@@ -47,12 +50,34 @@ pub fn start_comfyui_sidecar(app_handle: AppHandle<Wry>) {
         };
         info!("Executable directory: {}", exe_dir.display());
 
-        // Construct the path relative to the executable directory's parent
-        // build.rs copies 'vendor' to the executable's parent directory (e.g., target/vendor)
-        // So from target/debug/, we go up one level (../) to target/ and then into vendor/
-        let comfyui_dir = exe_dir.join("../vendor/comfyui"); // Also update comfyui_dir path
+        // Get the path to the target directory (parent of the executable directory)
+        let target_dir = match exe_dir.parent() {
+            Some(dir) => dir.to_path_buf(),
+            None => {
+                error!("Failed to get target directory from executable path: {}", exe_dir.display());
+                return;
+            }
+        };
+        info!("DEBUG: Base directory for vendor resolved at runtime: {:?}", target_dir);
 
-        // Get the path to the virtual environment's Python executable
+        // Construct the path to the vendor directory relative to the target directory
+        let vendor_path = target_dir.join("vendor");
+
+        // Construct the path to the Python installation root within the vendor directory
+        let python_root = if std::env::var("TAURI_DEV").is_ok() {
+            // In development mode, derive the path from CARGO_MANIFEST_DIR (src-tauri)
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join("vendor").join("python")
+        } else {
+            // In bundled mode, the vendor directory is relative to the executable.
+            vendor_path.join("python")
+        };
+
+        // Construct the path to the ComfyUI directory within the vendor directory
+        // Construct the path to the ComfyUI directory within the vendor directory
+        // Assuming development mode for now due to path resolution issues
+        let comfyui_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join("vendor").join("comfyui");
+
+        // Construct the path to the Python executable within the virtual environment
         let venv_dir = comfyui_dir.join(".venv");
         let venv_python_executable = if cfg!(target_os = "windows") {
             venv_dir.join("Scripts").join("python.exe")
@@ -60,10 +85,9 @@ pub fn start_comfyui_sidecar(app_handle: AppHandle<Wry>) {
             venv_dir.join("bin").join("python")
         };
 
-
         // Check if the constructed paths exist
         if !venv_python_executable.exists() {
-            error!("Venv Python executable not found at expected path: {}", venv_python_executable.display());
+            error!("Virtual environment Python executable not found at expected path: {}", venv_python_executable.display());
             return;
         }
          if !comfyui_dir.exists() {
@@ -82,7 +106,7 @@ pub fn start_comfyui_sidecar(app_handle: AppHandle<Wry>) {
             return;
         }
 
-        info!("Using Venv Python executable: {}", venv_python_executable.display());
+        info!("Using Python executable: {}", venv_python_executable.display());
         info!("Using ComfyUI script: {}", main_script.display());
         info!("Setting CWD to: {}", comfyui_dir.display());
 
@@ -131,11 +155,13 @@ pub fn start_comfyui_sidecar(app_handle: AppHandle<Wry>) {
         let final_command = format!("{} {}", venv_python_executable.to_string_lossy(), args.join(" "));
         info!("Final ComfyUI launch command: {}", final_command);
         info!("Working Directory: {}", comfyui_dir.display());
+        info!("Command path being used: {}", venv_python_executable.to_string_lossy());
+        info!("Working directory being used: {}", comfyui_dir.display());
 
         info!("Attempting to spawn ComfyUI process...");
-        let (mut rx, child) = match app_handle.shell().command(venv_python_executable.to_string_lossy().to_string())
+        let (mut rx, child) = match app_handle.shell().command(&venv_python_executable)
             .args(args.clone())
-            .current_dir(&comfyui_dir) // Pass as reference
+            .current_dir(&comfyui_dir) // Change working directory to comfyui_dir
             .spawn() {
                 Ok((rx, child)) => {
                     info!("ComfyUI process started successfully (PID: {}).", child.pid());

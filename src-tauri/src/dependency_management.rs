@@ -1,4 +1,3 @@
-use tauri::Emitter;
 use std::fs;
 use std::io::{prelude::*, BufReader};
 use std::env;
@@ -7,11 +6,12 @@ use log::{info, error};
 use uuid::Uuid;
 use scopeguard;
 use crate::gpu_detection::{GpuInfo, GpuType, get_gpu_info}; // Import from the gpu_detection module
-use tauri::{AppHandle, Manager, Wry}; // Import AppHandle, Manager, and Wry
+use tauri::{AppHandle, Manager, Wry, Emitter}; // Import AppHandle, Manager, Wry, and Emitter
 use serde::Serialize;
 use std::process::{Command, Stdio};
 use std::thread;
 use fs2::available_space; // Import available_space
+use tauri::path::BaseDirectory; // Import BaseDirectory
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -44,6 +44,9 @@ fn emit_status(app_handle: &AppHandle<Wry>, step: InstallationStep, message: Str
     }
 }
 
+// This function executes a command and streams its stdout and stderr,
+// logging each line with 'info!' for stdout and 'error!' for stderr.
+// The command itself is logged before execution.
 // Helper function to run a command and stream output
 fn run_command_with_progress(
     app_handle: &AppHandle<Wry>,
@@ -134,7 +137,15 @@ pub fn install_python_dependencies(app_handle: &AppHandle<Wry>) -> Result<(), Bo
     // Get the path to the bundled ComfyUI directory (where dependencies will be installed)
     let exe_path = std::env::current_exe()?;
     let exe_dir = exe_path.parent().ok_or("Failed to get executable directory")?;
-    let comfyui_dir = exe_dir.join("../vendor/comfyui");
+    // Determine the ComfyUI directory based on whether we are in development or bundled mode
+    let comfyui_dir = if std::env::var("TAURI_DEV").is_ok() {
+        // In development mode, derive the path from CARGO_MANIFEST_DIR (src-tauri)
+        // to the workspace root and then to target/debug/vendor/comfyui.
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join("vendor").join("comfyui")
+    } else {
+        // In bundled mode, the vendor directory is relative to the executable.
+        exe_dir.join("vendor/comfyui")
+    };
 
     // Check available disk space
     match available_space(&comfyui_dir) {
@@ -183,11 +194,49 @@ pub fn install_python_dependencies(app_handle: &AppHandle<Wry>) -> Result<(), Bo
     // Get the path to the bundled ComfyUI directory
     let exe_path = std::env::current_exe()?;
     let exe_dir = exe_path.parent().ok_or("Failed to get executable directory")?;
-    let comfyui_dir = exe_dir.join("../vendor/comfyui");
+    // Get the path to the bundled ComfyUI directory (where dependencies will be installed)
+    // Determine the ComfyUI directory based on whether we are in development or bundled mode
+    let comfyui_dir = if std::env::var("TAURI_DEV").is_ok() {
+        // In development mode, derive the path from CARGO_MANIFEST_DIR (src-tauri)
+        // to the workspace root and then to target/debug/vendor/comfyui.
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .ok_or("Failed to get workspace root")?
+            .to_path_buf(); // Convert the &Path to PathBuf
+        workspace_root.join("target").join("debug").join("vendor").join("comfyui")
+    } else {
+        // In bundled mode, the vendor directory is relative to the executable.
+        exe_dir.join("vendor/comfyui")
+    };
 
-    let requirements_path = comfyui_dir.join("requirements.txt");
+    // Resolve the path to requirements.txt based on build profile
+    let requirements_path = if cfg!(debug_assertions) {
+        // In development mode, derive the path from CARGO_MANIFEST_DIR (src-tauri)
+        // to the workspace root and then to target/debug/vendor/comfyui/requirements.txt.
+        let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join("vendor").join("comfyui").join("requirements.txt");
+        info!("DEBUG: Development mode detected. Resolved requirements.txt path: {}", dev_path.display());
+        dev_path
+    } else {
+        // In release mode, requirements.txt is bundled as a resource.
+        let release_path = app_handle.path().resolve("vendor/comfyui/requirements.txt", BaseDirectory::Resource)
+            .map_err(|e| {
+                let error_msg = format!("Failed to resolve path to vendor/comfyui/requirements.txt in release mode: {}. Ensure it's included in tauri.conf.json resources.", e);
+                error!("{}", error_msg);
+                emit_status(app_handle, InstallationStep::Error, error_msg.clone(), true);
+                error_msg
+            })?;
+        info!("DEBUG: Release mode detected. Resolved requirements.txt path: {}", release_path.display());
+        release_path
+    };
+
+    match std::env::current_dir() {
+        Ok(cwd) => info!("DEBUG: App CWD: {}", cwd.display()),
+        Err(e) => error!("DEBUG: Failed to get App CWD: {}", e),
+    }
+    info!("DEBUG: App checking for requirements.txt at: {}", requirements_path.display());
+
     if !requirements_path.exists() {
-        let error_msg = format!("ComfyUI requirements.txt not found at: {}", requirements_path.display());
+        let error_msg = format!("ComfyUI requirements.txt not found at resolved path: {}", requirements_path.display());
         error!("{}", error_msg);
         emit_status(app_handle, InstallationStep::Error, error_msg.clone(), true);
         return Err(error_msg.into());
@@ -196,7 +245,14 @@ pub fn install_python_dependencies(app_handle: &AppHandle<Wry>) -> Result<(), Bo
     info!("Reading dependencies from: {}", requirements_path.display());
     let requirements_content = fs::read_to_string(&requirements_path)?;
 
-    let python_executable = exe_dir.join("../vendor/python/python.exe"); // Get python executable path
+    let python_executable = if std::env::var("TAURI_DEV").is_ok() {
+        // In development mode, derive the path from CARGO_MANIFEST_DIR (src-tauri)
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join("vendor").join("python").join("python.exe")
+    } else {
+        // In bundled mode, the vendor directory is relative to the executable.
+        exe_dir.join("vendor/python/python.exe")
+    };
+    info!("DEBUG: Resolved Python executable path: {:?}", python_executable);
 
     if !python_executable.exists() {
         let error_msg = format!("Python executable not found at: {}", python_executable.display());
@@ -213,21 +269,27 @@ pub fn install_python_dependencies(app_handle: &AppHandle<Wry>) -> Result<(), Bo
     };
 
     // 1. Create a virtual environment if it doesn't exist
-    if !venv_dir.exists() {
-        run_command_with_progress(
-            app_handle,
-            InstallationStep::CreatingVirtualEnvironment,
-            &python_executable,
-            &["-m", "venv", venv_dir.to_str().unwrap()],
-            &comfyui_dir,
-            &format!("Creating virtual environment at: {}", venv_dir.display()),
-            "Virtual environment created successfully.",
-            "Failed to create virtual environment",
-        )?;
-    } else {
-        info!("Virtual environment already exists at: {}", venv_dir.display());
-        emit_status(app_handle, InstallationStep::CreatingVirtualEnvironment, "Virtual environment already exists.".into(), false);
+    // Ensure a clean virtual environment by removing it if it exists
+    if venv_dir.exists() {
+        info!("Removing existing virtual environment at: {}", venv_dir.display());
+        match fs::remove_dir_all(&venv_dir) {
+            Ok(_) => info!("Successfully removed existing virtual environment."),
+            Err(e) => error!("Failed to remove existing virtual environment: {}. Proceeding with creation, but this might cause issues.", e),
+        }
     }
+
+    // 1. Create a virtual environment
+    info!("Creating virtual environment at: {}", venv_dir.display());
+    run_command_with_progress(
+        app_handle,
+        InstallationStep::CreatingVirtualEnvironment,
+        &python_executable,
+        &["-m", "venv", venv_dir.to_str().unwrap()],
+        &comfyui_dir,
+        &format!("Creating virtual environment at: {}", venv_dir.display()),
+        "Virtual environment created successfully.",
+        "Failed to create virtual environment",
+    )?;
 
     // 2. Install dependencies into the virtual environment
     info!("Installing Python dependencies into virtual environment...");
@@ -245,8 +307,8 @@ import sys
 import subprocess
 
 # Set the CSV field size limit to handle potentially large fields in pip output
-# Using sys.maxsize is generally safer than a hardcoded large number
-csv.field_size_limit(sys.maxsize)
+# Using a large integer value to avoid potential OverflowError with sys.maxsize
+csv.field_size_limit(2147483647)
 
 # Execute the pip command with the received arguments
 # sys.argv[1:] contains the arguments passed after the script name
@@ -313,12 +375,13 @@ except Exception as e:
 
         let script_args_non_torch_refs: Vec<&str> = script_args_non_torch.iter().map(|s| s.as_str()).collect();
 
+        // The command and its output are logged by the run_command_with_progress function.
         run_command_with_progress(
             app_handle,
             InstallationStep::InstallingDependencies,
             &venv_python_executable,
             &script_args_non_torch_refs,
-            &comfyui_dir,
+            &comfyui_dir.parent().ok_or("Failed to get parent directory of comfyui_dir")?.to_path_buf(),
             &format!("Installing non-torch dependencies: {:?}", script_args_non_torch_refs),
             "Successfully installed non-torch Python dependencies.",
             "Pip install (non-torch)",
@@ -397,12 +460,13 @@ except Exception as e:
 
     let script_args_torch_refs: Vec<&str> = script_args_torch.iter().map(|s| s.as_str()).collect();
 
+    // The command and its output are logged by the run_command_with_progress function.
     run_command_with_progress(
         app_handle,
         InstallationStep::InstallingTorch,
         &venv_python_executable,
         &script_args_torch_refs,
-        &comfyui_dir,
+        &comfyui_dir.parent().ok_or("Failed to get parent directory of comfyui_dir")?.to_path_buf(),
         &format!("Installing torch dependencies: {:?}", script_args_torch_refs),
         "Successfully installed torch Python dependencies.",
         "Pip install (torch)",

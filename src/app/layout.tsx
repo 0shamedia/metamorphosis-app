@@ -2,12 +2,14 @@
 
  import { Geist, Geist_Mono } from "next/font/google";
  import "./globals.css";
- import TagContextWrapper from "@/components/TagContextWrapper";
- import { useState, useEffect } from "react";
- import * as httpPlugin from '@tauri-apps/plugin-http'; // Import the entire module
- import { generateComfyUIPromptData } from "./utils";
+import TagContextWrapper from "@/components/TagContextWrapper";
+import { useState, useEffect } from "react";
+import * as httpPlugin from '@tauri-apps/plugin-http'; // Import the entire module
+import { generateComfyUIPromptData } from "./utils";
+import CharacterSidebarPortrait from "@/features/character-display/components/CharacterSidebarPortrait"; // Import the component
+import useCharacterStore from "@/store/characterStore"; // Import the store
 
- // Remove destructuring and log
+// Remove destructuring and log
 
  const geist = Geist({ subsets: ['latin'] });
  const geist_mono = Geist_Mono({ subsets: ['latin'] });
@@ -18,6 +20,7 @@
   children: React.ReactNode;
  }) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  useCharacterStore(); // Access state via getState() where needed
 
   useEffect(() => {
   const sendPromptToComfyUI = async () => {
@@ -98,6 +101,12 @@
   {/* {tags.map((tag) => (
   <TagBadge key={tag.name} name={tag.name} category={tag.category} />
   ))} */}
+  {/* Integrate CharacterSidebarPortrait */}
+  <CharacterSidebarPortrait
+  imageUrl={useCharacterStore.getState().characterImageUrl ?? undefined}
+  isLoading={useCharacterStore.getState().loading}
+  isError={!!useCharacterStore.getState().error}
+  />
   </div>
   <div className="flex-1 p-4">
   {children}
