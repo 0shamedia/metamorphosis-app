@@ -24,15 +24,14 @@ interface TauriFsApi {
 }
 
 // Dynamically import Tauri API functions
-let tauriFs: Promise<TauriFsApi | null>;
-
-if (typeof window !== 'undefined' && window.__TAURI__) {
-  // Type assertion here to tell TypeScript that the imported module
-  // will conform to TauriFsApi when available.
-  tauriFs = import('@tauri-apps/api/fs') as Promise<TauriFsApi>;
-} else {
-  tauriFs = Promise.resolve(null);
-}
+// Define a function to get the Tauri FS API promise
+const getTauriFs = async (): Promise<TauriFsApi | null> => {
+  if (typeof window !== 'undefined' && window.__TAURI__) {
+    // Use a simple dynamic import
+    return import('@tauri-apps/api/fs') as Promise<TauriFsApi>;
+  }
+  return Promise.resolve(null);
+};
 
 import ProgressBar from './ProgressBar';
 
@@ -83,7 +82,7 @@ const ModelDownloader: React.FC = () => {
   // Function to get the base path for ComfyUI models
   const getComfyUIBasePath = useCallback(async (): Promise<string | null> => {
     if (baseResourcePath) return baseResourcePath;
-    const fs = await tauriFs;
+    const fs = await getTauriFs();
     if (!fs) {
       console.warn('Tauri FS API not available.');
       return null;
@@ -108,7 +107,7 @@ const ModelDownloader: React.FC = () => {
     const comfyUIBase = await getComfyUIBasePath();
     if (!comfyUIBase) return false;
 
-    const fs = await tauriFs;
+    const fs = await getTauriFs();
     if (!fs) {
       console.warn('Tauri FS API not available.');
       return false;
@@ -170,7 +169,7 @@ const ModelDownloader: React.FC = () => {
         return;
     }
 
-    const fs = await tauriFs;
+    const fs = await getTauriFs();
     if (!fs) {
       console.warn('Tauri FS API not available. Cannot download.');
       updateModelStatus(model.id, 'Error', undefined, 'Tauri API not available');

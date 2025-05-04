@@ -15,6 +15,7 @@ pub fn run() {
     .plugin(tauri_plugin_log::Builder::default().build()) // Initialize log plugin first
     .plugin(tauri_plugin_fs::init()) // Initialize the FS plugin
     .plugin(tauri_plugin_shell::init()) // Initialize the Shell plugin
+    .plugin(tauri_plugin_opener::init()) // Initialize the Opener plugin
     .setup(|app| {
       // Logging should be configured via the plugin initialization above
       // You can still log here if needed after initialization

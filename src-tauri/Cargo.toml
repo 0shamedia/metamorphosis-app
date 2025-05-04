@@ -38,3 +38,4 @@ tauri-plugin-shell = "2.2.1"
 uuid = { version = "1.8.0", features = ["v4"] }
 scopeguard = "1.2.0"
 fs2 = "0.4.0"
+tauri-plugin-opener = "2.2.6"
