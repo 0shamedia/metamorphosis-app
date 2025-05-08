@@ -15,7 +15,9 @@ use std::time::Instant; // To track restart times
 
 // Import necessary modules from the crate
 use crate::gpu_detection::{GpuInfo, GpuType, get_gpu_info};
-use crate::dependency_management;
+use crate::dependency_management::{self, InstallationStep, InstallationStatus}; // Import Installation types
+use tauri::Emitter; // Import Emitter for sending events
+use serde_json::json; // For creating JSON payloads
 
 // Global static variable to hold the child process handle
 static COMFYUI_CHILD_PROCESS: Lazy<Mutex<Option<CommandChild>>> = Lazy::new(|| Mutex::new(None));
@@ -24,94 +26,62 @@ static LAST_RESTART_TIME: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new
 const MAX_RESTARTS_PER_HOUR: u32 = 5; // Define a limit for restarts
 const COMFYUI_PORT: u16 = 8188; // TODO: Make this configurable
 
-// Function to start the sidecar
-pub fn start_comfyui_sidecar(app_handle: AppHandle<Wry>) {
-    // Clone app_handle specifically for the first spawned task
-    // Clone app_handle specifically for the first spawned task
-    let app_handle_clone_for_sidecar = app_handle.clone();
-    async_runtime::spawn(async move {
-        let app_handle = app_handle_clone_for_sidecar; // Use the cloned handle inside the async block
-        info!("Attempting to start ComfyUI sidecar process on port {}...", COMFYUI_PORT);
+// Helper to emit backend status
+fn emit_backend_status(app_handle: &AppHandle<Wry>, status: &str, message: String, is_error: bool) {
+    if let Err(e) = app_handle.emit("backend-status", json!({
+        "status": status,
+        "message": message,
+        "isError": is_error,
+    })) {
+        error!("Failed to emit backend status event: {}", e);
+    }
+}
 
-        // Check restart limits
-        let mut attempts = RESTART_ATTEMPTS.lock().unwrap();
-        let mut last_restart = LAST_RESTART_TIME.lock().unwrap();
 
-        let now = Instant::now();
-        if let Some(last_time) = *last_restart {
-            if now.duration_since(last_time) > Duration::from_secs(3600) { // Reset count after 1 hour
-                *attempts = 0;
-            }
-        }
-
-        if *attempts >= MAX_RESTARTS_PER_HOUR {
-            error!("Maximum restart attempts ({}) reached within the last hour. Not attempting to restart ComfyUI.", MAX_RESTARTS_PER_HOUR);
-            // TODO: Notify the user in the frontend
-            return;
-        }
-
-        *attempts += 1;
-        *last_restart = Some(now);
-
-        info!("Restart attempt #{}", *attempts);
-
-        // Install Python dependencies if not already installed
-        if let Err(e) = dependency_management::install_python_dependencies(&app_handle) {
-            error!("Failed to install Python dependencies: {}", e);
-            // Depending on the desired behavior, you might want to show an error to the user
-            // or prevent the ComfyUI sidecar from starting. For now, we just log the error.
-            return;
-        }
-        info!("Python dependency installation check/process completed.");
+// Renamed: Internal function to actually spawn the sidecar process
+// Assumes dependencies are already installed. Returns Result.
+async fn spawn_comfyui_process(app_handle: &AppHandle<Wry>) -> Result<(), String> {
+        info!("Attempting to spawn ComfyUI process on port {}...", COMFYUI_PORT);
+        emit_backend_status(app_handle, "starting_sidecar", format!("Starting ComfyUI backend on port {}...", COMFYUI_PORT), false);
 
         // Get the path to the directory containing the current executable
-        let exe_path = match std::env::current_exe() {
-            Ok(path) => path,
-            Err(e) => {
-                error!("Failed to get current executable path: {}", e);
-                return;
-            }
-        };
-        let exe_dir = match exe_path.parent() {
-             Some(dir) => dir.to_path_buf(), // Parent exists, convert &Path to PathBuf
-             None => {
-                 // Handle the case where there is no parent (e.g., root directory)
-                 error!("Failed to get parent directory of executable: {}", exe_path.display());
-                 // Depending on desired behavior, you might return an error,
-                 // use the current directory, or panic. Returning here as before.
-                 return;
-             }
-        };
+        let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get current executable path: {}", e))?;
+        // Removed dangling Ok/Err arms from previous match statement
+        let exe_dir = exe_path.parent().ok_or_else(|| format!("Failed to get parent directory of executable: {}", exe_path.display()))?.to_path_buf();
         info!("Executable directory: {}", exe_dir.display());
 
         // Get the path to the target directory (parent of the executable directory)
-        let target_dir = match exe_dir.parent() {
-            Some(dir) => dir.to_path_buf(),
-            None => {
-                error!("Failed to get target directory from executable path: {}", exe_dir.display());
-                return;
-            }
-        };
+        // This logic might need adjustment depending on the final build structure.
+        let target_dir = exe_dir.parent().ok_or_else(|| format!("Failed to get target directory from executable path: {}", exe_dir.display()))?.to_path_buf();
         info!("DEBUG: Base directory for vendor resolved at runtime: {:?}", target_dir);
 
-        // Construct the path to the vendor directory relative to the target directory
-        let vendor_path = target_dir.join("vendor");
-
-        // Construct the path to the Python installation root within the vendor directory
-        let python_root = if std::env::var("TAURI_DEV").is_ok() {
-            // In development mode, derive the path from CARGO_MANIFEST_DIR (src-tauri)
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join("vendor").join("python")
+        // Construct the path to the ComfyUI directory based on build mode
+        let comfyui_dir = if cfg!(debug_assertions) {
+            // --- DEBUG MODE ---
+            // `cfg!(debug_assertions)` is true for debug builds (e.g., `npm run tauri dev` or `cargo build`).
+            // In debug mode, assets copied by `build.rs` are located in the workspace's `target/debug/` directory.
+            // `env!("CARGO_MANIFEST_DIR")` points to `metamorphosis-app/src-tauri`.
+            // We navigate up one level to `metamorphosis-app/` and then into `target/debug/vendor/comfyui`.
+            // This logic is specific to debug builds.
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .expect("Failed to get parent of CARGO_MANIFEST_DIR for debug path construction")
+                .join("target")
+                .join("debug")
+                .join("vendor")
+                .join("comfyui")
         } else {
-            // In bundled mode, the vendor directory is relative to the executable.
-            vendor_path.join("python")
+            // --- RELEASE MODE ---
+            // `cfg!(debug_assertions)` is false for release builds (e.g., `cargo tauri build` or `cargo build --release`).
+            // In release builds, assets are bundled with the application executable.
+            // `target_dir` is derived from `current_exe()`'s parent, which should be the root of the bundled app resources.
+            // The path becomes relative to the executable's location.
+            // This depends on how `build.rs` and Tauri package the application.
+            target_dir.join("vendor").join("comfyui")
         };
 
-        // Construct the path to the ComfyUI directory within the vendor directory
-        // Construct the path to the ComfyUI directory within the vendor directory
-        // Assuming development mode for now due to path resolution issues
-        let comfyui_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join("vendor").join("comfyui");
-
         // Construct the path to the Python executable within the virtual environment
+        // The venv path is relative to the `comfyui_dir` which is already resolved for debug/release.
         let venv_dir = comfyui_dir.join(".venv");
         let venv_python_executable = if cfg!(target_os = "windows") {
             venv_dir.join("Scripts").join("python.exe")
@@ -121,24 +91,27 @@ pub fn start_comfyui_sidecar(app_handle: AppHandle<Wry>) {
 
         // Check if the constructed paths exist
         if !venv_python_executable.exists() {
-            error!("Virtual environment Python executable not found at expected path: {}", venv_python_executable.display());
-            return;
+            let err_msg = format!("Virtual environment Python executable not found at expected path: {}", venv_python_executable.display());
+            error!("{}", err_msg);
+            emit_backend_status(app_handle, "backend_error", err_msg.clone(), true);
+            return Err(err_msg);
         }
          if !comfyui_dir.exists() {
-             error!("ComfyUI directory not found at expected path: {}", comfyui_dir.display());
-             return;
+             let err_msg = format!("ComfyUI directory not found at expected path: {}", comfyui_dir.display());
+             error!("{}", err_msg);
+             emit_backend_status(app_handle, "backend_error", err_msg.clone(), true);
+             return Err(err_msg);
          }
 
         let main_script = comfyui_dir.join("main.py");
 
         if !main_script.exists() {
-            error!("ComfyUI main.py not found at: {}", main_script.display());
-            return;
+            let err_msg = format!("ComfyUI main.py not found at: {}", main_script.display());
+            error!("{}", err_msg);
+            emit_backend_status(app_handle, "backend_error", err_msg.clone(), true);
+            return Err(err_msg);
         }
-        if !comfyui_dir.exists() {
-            error!("ComfyUI directory not found at: {}", comfyui_dir.display());
-            return;
-        }
+        // Redundant check for comfyui_dir removed
 
         info!("Using Python executable: {}", venv_python_executable.display());
         info!("Using ComfyUI script: {}", main_script.display());
@@ -205,16 +178,17 @@ pub fn start_comfyui_sidecar(app_handle: AppHandle<Wry>) {
                     (rx, child)
                 },
                 Err(e) => {
-                    error!("Failed to spawn ComfyUI process: {}", e);
-                    error!("Spawn failed for ComfyUI process."); // Added log
-                    // Depending on the desired behavior, you might want to show an error to the user
-                    // or prevent the application from continuing. For now, we just log the error.
-                    return;
+                    let err_msg = format!("Failed to spawn ComfyUI process: {}", e);
+                    error!("{}", err_msg);
+                    emit_backend_status(app_handle, "backend_error", err_msg.clone(), true);
+                    return Err(err_msg);
                 }
             };
 
         // Asynchronous logging using CommandEvent
+        let app_handle_clone_for_logs = app_handle.clone(); // Clone for the logging task
         async_runtime::spawn(async move {
+            let app_handle = app_handle_clone_for_logs; // Use the cloned handle
             while let Some(event) = rx.recv().await {
                 match event {
                     CommandEvent::Stdout(line) => {
@@ -226,8 +200,13 @@ pub fn start_comfyui_sidecar(app_handle: AppHandle<Wry>) {
                     CommandEvent::Terminated(exit_status) => {
                         info!("[ComfyUI] Process terminated with status: {:?}", exit_status);
                         // Update the global child process handle to None
-                        *COMFYUI_CHILD_PROCESS.lock().unwrap() = None;
-                        info!("ComfyUI child process handle cleared on termination.");
+                        let mut child_lock = COMFYUI_CHILD_PROCESS.lock().unwrap();
+                        if child_lock.is_some() {
+                            *child_lock = None;
+                            info!("ComfyUI child process handle cleared on termination.");
+                            // Optionally emit a status update about termination
+                            // emit_backend_status(&app_handle, "sidecar_terminated", format!("ComfyUI process terminated: {:?}", exit_status), false);
+                        }
                     }
                     _ => {} // Ignore other events for now
                 }
@@ -238,14 +217,19 @@ pub fn start_comfyui_sidecar(app_handle: AppHandle<Wry>) {
 
         // Store the child handle
         *COMFYUI_CHILD_PROCESS.lock().unwrap() = Some(child);
-        info!("ComfyUI child process handle stored successfully."); // Added log
+        info!("ComfyUI child process handle stored successfully.");
 
-    });
+        // DO NOT start health monitor here - let the calling function do it.
 
-    // Start health monitoring task after attempting to start the process
-    // Clone app_handle before moving it into the spawned task
-    async_runtime::spawn(monitor_comfyui_health(app_handle.clone()));
+        // Emit status indicating the process has spawned, but maybe not fully ready yet
+        // emit_backend_status(app_handle, "sidecar_spawned", "ComfyUI process spawned.".to_string(), false);
+        // Let's keep emitting backend_ready here for now, assuming health monitor starts quickly after.
+         emit_backend_status(app_handle, "backend_ready", "ComfyUI backend process started.".to_string(), false);
+
+
+        Ok(()) // Return Ok on successful spawn
 }
+
 
 // Function to monitor the health of the ComfyUI sidecar
 async fn monitor_comfyui_health(app_handle: AppHandle<Wry>) {
@@ -265,9 +249,39 @@ async fn monitor_comfyui_health(app_handle: AppHandle<Wry>) {
 
         if !is_running {
             info!("ComfyUI process is not running, attempting to restart...");
-            let app_handle_clone = app_handle.clone(); // Clone app_handle before moving into the spawned task
-            start_comfyui_sidecar(app_handle_clone);
-            continue; // Skip health check for this interval as we just attempted a restart
+            // Check restart limits before attempting
+            let mut attempts_lock = RESTART_ATTEMPTS.lock().unwrap();
+            let mut last_restart_lock = LAST_RESTART_TIME.lock().unwrap();
+            let now = Instant::now();
+            if let Some(last_time) = *last_restart_lock {
+                if now.duration_since(last_time) > Duration::from_secs(3600) {
+                    *attempts_lock = 0; // Reset after an hour
+                }
+            }
+            if *attempts_lock < MAX_RESTARTS_PER_HOUR {
+                *attempts_lock += 1;
+                *last_restart_lock = Some(now);
+                let attempt_count = *attempts_lock;
+                // Drop locks before await
+                drop(attempts_lock);
+                drop(last_restart_lock);
+
+                info!("Restart attempt #{}", attempt_count);
+                let app_handle_clone = app_handle.clone();
+                // Spawn the restart attempt
+                async_runtime::spawn(async move {
+                    if let Err(e) = spawn_comfyui_process(&app_handle_clone).await {
+                        error!("Restart attempt failed: {}", e);
+                        // Optionally emit error status
+                        emit_backend_status(&app_handle_clone, "backend_error", format!("Restart attempt failed: {}", e), true);
+                    }
+                });
+            } else {
+                error!("Maximum restart attempts reached. Not restarting ComfyUI.");
+                // Optionally emit a persistent error status
+                emit_backend_status(&app_handle, "backend_error", "Maximum restart attempts reached.".to_string(), true);
+            }
+            continue; // Skip health check for this interval
         }
 
         // Perform a simple HTTP GET request to the ComfyUI API endpoint using reqwest::Client
@@ -285,30 +299,70 @@ async fn monitor_comfyui_health(app_handle: AppHandle<Wry>) {
                     }
                 } else {
                     error!("ComfyUI health check failed: Received non-success status code: {}", response.status());
-                    // Process might be running but unresponsive, attempt restart
-                    let app_handle_clone = app_handle.clone(); // Clone app_handle before moving into the spawned task
-                    start_comfyui_sidecar(app_handle_clone);
+                    // Process might be running but unresponsive, attempt restart (logic moved to !is_running check)
+                    error!("ComfyUI health check failed: Received non-success status code: {}", response.status());
+                    // Consider killing the unresponsive process before restarting
+                    stop_comfyui_sidecar(); // Attempt to kill the potentially hung process
+                    // Restart logic will be handled by the next !is_running check
                 }
             }
             Err(e) => {
-                if e.is_connect() {
-                    // Log connection errors with more detail, including the source if available
-                    let mut error_msg = format!("ComfyUI health check failed: Connection error: {}", e);
-                    if let Some(source) = e.source() {
-                        error_msg.push_str(&format!(" Source: {}", source));
-                    }
-                    error!("{}", error_msg);
-                } else if e.is_timeout() {
-                     error!("ComfyUI health check failed: Timeout error: {}", e);
-                } else if e.is_request() {
-                     error!("ComfyUI health check failed: Request error: {}", e);
-                }
-                else {
-                    error!("ComfyUI health check failed: Other error: {}", e);
-                }
-                // Process is likely crashed or not listening, attempt restart
-                start_comfyui_sidecar(app_handle.clone());
+                 let error_kind = if e.is_connect() { "Connection" }
+                                else if e.is_timeout() { "Timeout" }
+                                else if e.is_request() { "Request" }
+                                else { "Other" };
+                 let mut error_msg = format!("ComfyUI health check failed: {} error: {}", error_kind, e);
+                 if let Some(source) = e.source() {
+                     error_msg.push_str(&format!(" Source: {}", source));
+                 }
+                 error!("{}", error_msg);
+
+                // Process is likely crashed or not listening, attempt restart (logic moved to !is_running check)
+                // Ensure the process handle is cleared if it's likely crashed
+                stop_comfyui_sidecar(); // Attempt to kill and clear handle
             }
+        }
+    }
+}
+
+// New command to ensure dependencies are installed and sidecar is started
+#[tauri::command]
+pub async fn ensure_backend_ready(app_handle: AppHandle<Wry>) -> Result<(), String> {
+    info!("Ensuring backend is ready...");
+    emit_backend_status(&app_handle, "checking_dependencies", "Checking backend dependencies...".to_string(), false);
+
+    // 1. Install Dependencies
+    match dependency_management::install_python_dependencies(&app_handle).await {
+        Ok(_) => {
+            info!("Dependency check/installation complete.");
+            // Don't emit success here, wait for sidecar start
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to install Python dependencies: {}", e);
+            error!("{}", err_msg);
+            emit_backend_status(&app_handle, "backend_error", err_msg.clone(), true);
+            return Err(err_msg);
+        }
+    }
+
+    // 2. Start Sidecar Process (using the refactored internal function)
+    emit_backend_status(&app_handle, "starting_sidecar", "Starting ComfyUI backend...".to_string(), false);
+    match spawn_comfyui_process(&app_handle).await {
+        Ok(_) => {
+            info!("ComfyUI sidecar process spawned successfully via ensure_backend_ready.");
+            // Now spawn the health monitor since the process started
+            info!("Attempting to start ComfyUI health monitor...");
+            let app_handle_for_monitor = app_handle.clone();
+            async_runtime::spawn(monitor_comfyui_health(app_handle_for_monitor));
+            info!("ComfyUI health monitor spawn initiated.");
+            // Success status ("backend_ready") is emitted inside spawn_comfyui_process
+            Ok(())
+        }
+        Err(e) => {
+             let err_msg = format!("Failed to start ComfyUI sidecar process: {}", e);
+             error!("{}", err_msg);
+             // Error status should have been emitted by spawn_comfyui_process
+             Err(err_msg)
         }
     }
 }

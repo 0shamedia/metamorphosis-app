@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading Metamorphosis...</title>
+    <style>
+        body {
+            background-color: #F5F3FF; /* Light purple, similar to purple-100 */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+            color: #5B21B6; /* Darker purple for text */
+            overflow: hidden;
+        }
+        .logo-container svg {
+            width: 80px;
+            height: 80px;
+            animation: spin 2s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .loading-text {
+            margin-top: 20px;
+            font-size: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <div class="logo-container">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="#A78BFA">
+            <path d="M50,30 C60,15 80,10 90,25 C95,35 85,45 75,40 C65,35 60,25 50,30 C40,25 35,35 25,40 C15,45 5,35 10,25 C20,10 40,15 50,30 Z" />
+        </svg>
+    </div>
+    <div class="loading-text">Loading Metamorphosis...</div>
+</body>
+</html>

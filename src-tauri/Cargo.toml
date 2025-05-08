@@ -39,3 +39,5 @@ uuid = { version = "1.8.0", features = ["v4"] }
 scopeguard = "1.2.0"
 fs2 = "0.4.0"
 tauri-plugin-opener = "2.2.6"
+chrono = "0.4" # Added for better timestamp handling
+

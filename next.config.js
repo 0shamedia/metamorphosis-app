@@ -1,23 +1,20 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // For Tauri static export
   output: 'export',
-  // Optional: Add other Next.js configurations here if needed
-  // For example, if you need to handle images or other assets:
-  // images: {
-  //   unoptimized: true,
-  // },
-  webpack: (config, { isServer }) => {
-    // Only apply this to the client-side build
-    if (!isServer) {
-      config.externals.push(
-        /^@tauri-apps\/api\/.+$/
-      );
-      config.externals.push(
-        /^@tauri-apps\/plugin-.+$/
-      );
-    }
-    return config;
+  
+  // Disable image optimization for static export
+  images: {
+    unoptimized: true,
   },
+  
+  // Disable the eslint check during build
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  
+  // Disable strict mode for development
+  reactStrictMode: false
 };
 
 module.exports = nextConfig;

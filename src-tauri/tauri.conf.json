@@ -9,8 +9,32 @@
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: localhost:3000 localhost:8188 ws://localhost:3000 ws://localhost:8188 http://localhost:3000 http://localhost:8188; connect-src 'self' ipc: ws: localhost:3000 localhost:8188 http://localhost:3000 http://localhost:8188 ws://localhost:3000 ws://localhost:8188"
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "height": 700,
+        "resizable": true,
+        "title": "Metamorphosis",
+        "width": 900,
+        "url": "loading.html",
+        "visible": false,
+        "focus": true,
+        "decorations": true,
+        "center": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "theme": "Light"
+      }
+    ]
+  },
   "bundle": {
     "active": true,
+    "targets": "all",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -18,28 +42,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "targets": "all",
     "resources": [
       "../resources/workflows/face_workflow_template.json",
       "../resources/workflows/fullbody_workflow_template.json",
-      "../vendor/comfyui/requirements.txt"
+      "../vendor/comfyui/requirements.txt",
+      "loading.html"
     ]
   },
-  "app": {
-    "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://127.0.0.1:8188/* ws://127.0.0.1:8188",
-      "capabilities": [
-        "default"
-      ]
-    },
-    "windows": [
-      {
-        "fullscreen": false,
-        "height": 600,
-        "resizable": true,
-        "title": "Metamorphosis",
-        "width": 800
-      }
-    ]
+  "plugins": {
+    "shell": {
+      "open": false
+    }
   }
 }

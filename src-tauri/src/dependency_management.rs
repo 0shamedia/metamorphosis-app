@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{prelude::*, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
 use std::env;
 use std::path::PathBuf;
 use log::{info, error};
@@ -8,10 +8,12 @@ use scopeguard;
 use crate::gpu_detection::{GpuInfo, GpuType, get_gpu_info}; // Import from the gpu_detection module
 use tauri::{AppHandle, Manager, Wry, Emitter}; // Import AppHandle, Manager, Wry, and Emitter
 use serde::Serialize;
-use std::process::{Command, Stdio};
-use std::thread;
+use tokio::process::Command; // Replaced std::process::Command
+use std::process::Stdio; // Stdio is still needed
+use tokio::task; // Replaced std::thread
 use fs2::available_space; // Import available_space
 use tauri::path::BaseDirectory; // Import BaseDirectory
+use std::io::Write; // Import the Write trait
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -48,7 +50,7 @@ fn emit_status(app_handle: &AppHandle<Wry>, step: InstallationStep, message: Str
 // logging each line with 'info!' for stdout and 'error!' for stderr.
 // The command itself is logged before execution.
 // Helper function to run a command and stream output
-fn run_command_with_progress(
+async fn run_command_with_progress(
     app_handle: &AppHandle<Wry>,
     step: InstallationStep,
     command_path: &PathBuf,
@@ -73,45 +75,37 @@ fn run_command_with_progress(
 
     let app_handle_clone_stdout = app_handle.clone();
     let step_clone_stdout = step.clone();
-    let stdout_thread = thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    info!("Stdout: {}", line);
-                    emit_status(&app_handle_clone_stdout, step_clone_stdout.clone(), line, false);
-                }
-                Err(e) => {
-                    error!("Error reading stdout: {}", e);
-                    emit_status(&app_handle_clone_stdout, InstallationStep::Error, format!("Error reading stdout: {}", e), true);
-                }
-            }
+    let stdout_task = task::spawn(async move {
+        let mut reader = TokioBufReader::new(stdout);
+        let mut line_buf = String::new();
+        while let Ok(n) = reader.read_line(&mut line_buf).await {
+            if n == 0 { break; } // EOF
+            let line_to_emit = line_buf.trim_end().to_string();
+            info!("Stdout: {}", line_to_emit);
+            emit_status(&app_handle_clone_stdout, step_clone_stdout.clone(), line_to_emit, false);
+            line_buf.clear();
         }
     });
 
     let app_handle_clone_stderr = app_handle.clone();
     let step_clone_stderr = step.clone();
-    let stderr_thread = thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    error!("Stderr: {}", line);
-                    // Treat stderr lines as progress updates but mark them as errors for potential UI highlighting
-                    emit_status(&app_handle_clone_stderr, step_clone_stderr.clone(), line, true);
-                }
-                Err(e) => {
-                    error!("Error reading stderr: {}", e);
-                    emit_status(&app_handle_clone_stderr, InstallationStep::Error, format!("Error reading stderr: {}", e), true);
-                }
-            }
+    let stderr_task = task::spawn(async move {
+        let mut reader = TokioBufReader::new(stderr);
+        let mut line_buf = String::new();
+        while let Ok(n) = reader.read_line(&mut line_buf).await {
+            if n == 0 { break; } // EOF
+            let line_to_emit = line_buf.trim_end().to_string();
+            error!("Stderr: {}", line_to_emit);
+            // Treat stderr lines as progress updates but mark them as errors for potential UI highlighting
+            emit_status(&app_handle_clone_stderr, step_clone_stderr.clone(), line_to_emit, true);
+            line_buf.clear();
         }
     });
 
-    let status = child.wait()?;
+    let status = child.wait().await?;
 
-    stdout_thread.join().map_err(|e| format!("Stdout thread panicked: {:?}", e))?;
-    stderr_thread.join().map_err(|e| format!("Stderr thread panicked: {:?}", e))?;
+    stdout_task.await.map_err(|e| format!("Stdout task panicked: {:?}", e))?;
+    stderr_task.await.map_err(|e| format!("Stderr task panicked: {:?}", e))?;
 
     if !status.success() {
         let error_msg = format!("{} failed with status: {:?}", error_message_prefix, status);
@@ -130,20 +124,44 @@ fn run_command_with_progress(
 // Estimated required disk space for ComfyUI dependencies (20 GB)
 const REQUIRED_DISK_SPACE: u64 = 20 * 1024 * 1024 * 1024; // in bytes
 
-pub fn install_python_dependencies(app_handle: &AppHandle<Wry>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn install_python_dependencies(app_handle: &AppHandle<Wry>) -> Result<(), Box<dyn std::error::Error>> {
     info!("Checking if Python dependencies are installed...");
     emit_status(app_handle, InstallationStep::CheckingDependencies, "Checking if dependencies are already installed...".into(), false);
 
     // Get the path to the bundled ComfyUI directory (where dependencies will be installed)
     let exe_path = std::env::current_exe()?;
     let exe_dir = exe_path.parent().ok_or("Failed to get executable directory")?;
+
+    // !!! CRITICAL PATH RESOLUTION LOGIC !!!
+    // This section determines paths to essential resources (ComfyUI directory, Python executable, requirements.txt).
+    // It differs significantly between DEBUG (`npm run tauri dev`) and RELEASE (`cargo tauri build`) builds.
+    // DO NOT MODIFY without a deep understanding of Tauri's build system, `build.rs` asset placement,
+    // and asset pathing for both modes.
+    // ALWAYS test both `npm run tauri dev` AND release builds after any changes.
+    // See .roo/memory/decisionLog.md for detailed explanation (entry [2025-05-07 12:26:00]).
+
     // Determine the ComfyUI directory based on whether we are in development or bundled mode
-    let comfyui_dir = if std::env::var("TAURI_DEV").is_ok() {
-        // In development mode, derive the path from CARGO_MANIFEST_DIR (src-tauri)
-        // to the workspace root and then to target/debug/vendor/comfyui.
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join("vendor").join("comfyui")
+    let comfyui_dir = if cfg!(debug_assertions) {
+        // --- DEBUG MODE ---
+        // `cfg!(debug_assertions)` is true for debug builds (e.g., `npm run tauri dev` or `cargo build`).
+        // In debug mode, assets copied by `build.rs` are located in the workspace's `target/debug/` directory.
+        // `env!("CARGO_MANIFEST_DIR")` points to `metamorphosis-app/src-tauri`.
+        // We navigate up one level to `metamorphosis-app/` and then into `target/debug/vendor/comfyui`.
+        // This logic is specific to debug builds and aligns with comfyui_sidecar.rs.
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("Failed to get parent of CARGO_MANIFEST_DIR for debug comfyui_dir")
+            .join("target")
+            .join("debug")
+            .join("vendor")
+            .join("comfyui")
     } else {
-        // In bundled mode, the vendor directory is relative to the executable.
+        // --- RELEASE MODE ---
+        // `cfg!(debug_assertions)` is false for release builds (e.g., `cargo tauri build` or `cargo build --release`).
+        // In release builds, assets are bundled with the application executable.
+        // `exe_dir` is the directory containing the application executable.
+        // The path becomes relative to the executable's location (e.g., `exe_dir/vendor/comfyui`).
+        // This depends on how `build.rs` and Tauri package the application.
         exe_dir.join("vendor/comfyui")
     };
 
@@ -196,28 +214,50 @@ pub fn install_python_dependencies(app_handle: &AppHandle<Wry>) -> Result<(), Bo
     let exe_dir = exe_path.parent().ok_or("Failed to get executable directory")?;
     // Get the path to the bundled ComfyUI directory (where dependencies will be installed)
     // Determine the ComfyUI directory based on whether we are in development or bundled mode
-    let comfyui_dir = if std::env::var("TAURI_DEV").is_ok() {
-        // In development mode, derive the path from CARGO_MANIFEST_DIR (src-tauri)
-        // to the workspace root and then to target/debug/vendor/comfyui.
+    // This is a re-declaration of comfyui_dir, ensure consistency with the one above or refactor.
+    // For now, applying comments as per the pattern.
+    let comfyui_dir = if cfg!(debug_assertions) {
+        // --- DEBUG MODE ---
+        // `cfg!(debug_assertions)` is true for debug builds.
+        // `env!("CARGO_MANIFEST_DIR")` points to `metamorphosis-app/src-tauri`.
+        // We navigate up to the workspace root (`metamorphosis-app/`) and then to `target/debug/vendor/comfyui`.
+        // This logic is specific to debug builds.
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .ok_or("Failed to get workspace root")?
             .to_path_buf(); // Convert the &Path to PathBuf
         workspace_root.join("target").join("debug").join("vendor").join("comfyui")
     } else {
-        // In bundled mode, the vendor directory is relative to the executable.
+        // --- RELEASE MODE ---
+        // `cfg!(debug_assertions)` is false for release builds.
+        // `exe_dir` is the directory of the executable.
+        // Path is `exe_dir/vendor/comfyui`. This depends on the release packaging structure.
         exe_dir.join("vendor/comfyui")
     };
 
     // Resolve the path to requirements.txt based on build profile
     let requirements_path = if cfg!(debug_assertions) {
-        // In development mode, derive the path from CARGO_MANIFEST_DIR (src-tauri)
-        // to the workspace root and then to target/debug/vendor/comfyui/requirements.txt.
-        let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join("vendor").join("comfyui").join("requirements.txt");
+        // --- DEBUG MODE ---
+        // `cfg!(debug_assertions)` is true for debug builds.
+        // `env!("CARGO_MANIFEST_DIR")` points to `metamorphosis-app/src-tauri`.
+        // We navigate up to the workspace root (`metamorphosis-app/`) and then to `target/debug/vendor/comfyui/requirements.txt`.
+        // This logic is specific to debug builds.
+        let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .ok_or("Failed to get parent directory of CARGO_MANIFEST_DIR")?
+            .join("target")
+            .join("debug")
+            .join("vendor")
+            .join("comfyui")
+            .join("requirements.txt");
         info!("DEBUG: Development mode detected. Resolved requirements.txt path: {}", dev_path.display());
         dev_path
     } else {
-        // In release mode, requirements.txt is bundled as a resource.
+        // --- RELEASE MODE ---
+        // `cfg!(debug_assertions)` is false for release builds.
+        // In release mode, `requirements.txt` is expected to be a bundled resource.
+        // `app_handle.path().resolve_resource()` is used to get its path.
+        // This pathing depends on `tauri.conf.json` resource bundling and the packaging structure.
         let release_path = app_handle.path().resolve("vendor/comfyui/requirements.txt", BaseDirectory::Resource)
             .map_err(|e| {
                 let error_msg = format!("Failed to resolve path to vendor/comfyui/requirements.txt in release mode: {}. Ensure it's included in tauri.conf.json resources.", e);
@@ -245,14 +285,30 @@ pub fn install_python_dependencies(app_handle: &AppHandle<Wry>) -> Result<(), Bo
     info!("Reading dependencies from: {}", requirements_path.display());
     let requirements_content = fs::read_to_string(&requirements_path)?;
 
-    let python_executable = if std::env::var("TAURI_DEV").is_ok() {
-        // In development mode, derive the path from CARGO_MANIFEST_DIR (src-tauri)
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join("vendor").join("python").join("python.exe")
+    info!("TAURI_DEV set: {}", std::env::var("TAURI_DEV").is_ok());
+    let python_executable = if cfg!(debug_assertions) {
+        // --- DEBUG MODE ---
+        // `cfg!(debug_assertions)` is true for debug builds.
+        // `env!("CARGO_MANIFEST_DIR")` points to `metamorphosis-app/src-tauri`.
+        // We navigate up to the workspace root (`metamorphosis-app/`) and then to `target/debug/vendor/python/python.exe`.
+        // This logic is specific to debug builds.
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .ok_or("Failed to get workspace root from CARGO_MANIFEST_DIR for python executable")?
+            .join("target")
+            .join("debug")
+            .join("vendor")
+            .join("python")
+            .join("python.exe")
     } else {
-        // In bundled mode, the vendor directory is relative to the executable.
+        // --- RELEASE MODE ---
+        // `cfg!(debug_assertions)` is false for release builds.
+        // `exe_dir` is the directory of the executable.
+        // Path is `exe_dir/vendor/python/python.exe`. This depends on the release packaging structure.
         exe_dir.join("vendor/python/python.exe")
     };
     info!("DEBUG: Resolved Python executable path: {:?}", python_executable);
+    info!("Final python_executable path check: {:?}", python_executable);
 
     if !python_executable.exists() {
         let error_msg = format!("Python executable not found at: {}", python_executable.display());
@@ -289,7 +345,7 @@ pub fn install_python_dependencies(app_handle: &AppHandle<Wry>) -> Result<(), Bo
         &format!("Creating virtual environment at: {}", venv_dir.display()),
         "Virtual environment created successfully.",
         "Failed to create virtual environment",
-    )?;
+    ).await?;
 
     // 2. Install dependencies into the virtual environment
     info!("Installing Python dependencies into virtual environment...");
@@ -385,7 +441,7 @@ except Exception as e:
             &format!("Installing non-torch dependencies: {:?}", script_args_non_torch_refs),
             "Successfully installed non-torch Python dependencies.",
             "Pip install (non-torch)",
-        )?;
+        ).await?;
 
     } else {
         info!("No non-torch dependencies to install.");
@@ -470,7 +526,7 @@ except Exception as e:
         &format!("Installing torch dependencies: {:?}", script_args_torch_refs),
         "Successfully installed torch Python dependencies.",
         "Pip install (torch)",
-    )?;
+    ).await?;
 
 
     // Set a flag indicating dependencies are installed by creating a marker file
