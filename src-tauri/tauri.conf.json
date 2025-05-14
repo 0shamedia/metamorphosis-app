@@ -45,8 +45,7 @@
     "resources": [
       "../resources/workflows/face_workflow_template.json",
       "../resources/workflows/fullbody_workflow_template.json",
-      "../vendor/comfyui/requirements.txt",
-      "loading.html"
+      "../vendor/comfyui/requirements.txt"
     ]
   },
   "plugins": {

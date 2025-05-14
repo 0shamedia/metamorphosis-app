@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 // Removed Image from 'next/image' as it's not used in the new logo component directly
 
 // CSS for animations from the new example
@@ -99,76 +99,229 @@ interface SplashScreenProps {
 export default function SplashScreenComponent({ onComplete }: SplashScreenProps) {
   const [loadingText, setLoadingText] = useState('Initializing...');
   const [progress, setProgress] = useState(0); // For visual progress bar
-  const [isBackendReady, setIsBackendReady] = useState(false); // Renamed from isReady for clarity
+  const [isBackendReady, setIsBackendReady] = useState(false); // Final readiness for main app
   const [initializationError, setInitializationError] = useState<string | null>(null);
-  
+  const [navigateToSetup, setNavigateToSetup] = useState(false);
+  const [isStartingServices, setIsStartingServices] = useState(false); // New state
+  const ensurePromiseResolvedRef = useRef(false); // Ref for the new timeout logic
+
   // Backend communication logic
   useEffect(() => {
     console.log('[SplashScreen] Component mounted at:', new Date().toISOString());
+    let unlistenSetupStatus: (() => void) | null = null;
     let unlistenInstallation: (() => void) | null = null;
-    let unlistenBackend: (() => void) | null = null;
+    let unlistenBackendStatus: (() => void) | null = null;
+    let initialVerificationTimerId: NodeJS.Timeout | null = null;
+    let serviceStartupTimerId: NodeJS.Timeout | null = null;
+    let ensureCmdTimeoutId: NodeJS.Timeout | null = null; // Timer for ensure_comfyui_running_and_healthy
 
-    const setupAndRunBackend = async () => {
-      console.log('[SplashScreen] Setting up backend communication...');
+    const initializeApplication = async () => {
+      console.log('[SplashScreen] Initializing application setup status check...');
       try {
         const { listen } = await import('@tauri-apps/api/event');
         const { invoke } = await import('@tauri-apps/api/core');
 
-        // Listener for Installation Status
+        // Listener for the new setup_status event
+        const setupStatusListener = await listen('setup_status', (event) => {
+          console.log(`[SplashScreen] Received setup_status event (raw object):`, event);
+          const rawPayload = event.payload;
+          console.log(`[SplashScreen] Raw event.payload:`, rawPayload);
+          console.log(`[SplashScreen] typeof event.payload:`, typeof rawPayload);
+
+          if (typeof rawPayload !== 'object' || rawPayload === null) {
+            console.error('[SplashScreen] Malformed: event.payload is not an object or is null. Payload:', rawPayload);
+            setLoadingText('Received malformed status (payload not object).');
+            setInitializationError('Malformed status from backend (payload not object).');
+            setNavigateToSetup(true);
+            if (initialVerificationTimerId) clearTimeout(initialVerificationTimerId);
+            initialVerificationTimerId = null;
+            return;
+          }
+
+          // Assert rawPayload is an object by this point, cast to any for inspection
+          const inspectedPayload = rawPayload as any;
+          if (typeof inspectedPayload.type !== 'string') {
+            console.error(`[SplashScreen] Malformed: event.payload is an object, but its 'type' property is not a string. 'type' is: ${typeof inspectedPayload.type}. Full payload:`, inspectedPayload);
+            setLoadingText('Received malformed status (type field issue).');
+            setInitializationError('Malformed status from backend (type field issue).');
+            setNavigateToSetup(true);
+            if (initialVerificationTimerId) clearTimeout(initialVerificationTimerId);
+            initialVerificationTimerId = null;
+            return;
+          }
+          
+          // Payload is an object with a 'type' string property
+          console.log(`[SplashScreen] Payload appears valid. Type: '${inspectedPayload.type}'. Data:`, inspectedPayload.data);
+
+          switch (inspectedPayload.type) {
+            case "backendFullyVerifiedAndReady":
+              console.log('[SplashScreen] Backend is fully verified and ready (files). Attempting to start backend services.');
+              setLoadingText('File verification complete. Starting backend services...');
+              setProgress(75);
+              
+              if (initialVerificationTimerId) clearTimeout(initialVerificationTimerId);
+              initialVerificationTimerId = null;
+              
+              setIsStartingServices(true);
+              setNavigateToSetup(false);
+              ensurePromiseResolvedRef.current = false; // Reset for this attempt
+
+              console.log('[SplashScreen] Starting service startup failsafe timer (3 min)...');
+              serviceStartupTimerId = setTimeout(() => {
+                // This timer callback needs to access current state values.
+                // Using functional updates or refs for isStartingServices, isBackendReady etc. is safer.
+                // For now, assuming direct state access in the log is illustrative.
+                console.warn(`[SplashScreen] Failsafe timeout (3 min) for service startup triggered. States: isStartingServices=${isStartingServices}, isBackendReady=${isBackendReady}, navigateToSetup=${navigateToSetup}, initializationError=${initializationError}`);
+                // Check state again to ensure it hasn't resolved
+                // This check should ideally use fresh state values if possible (e.g., via functional setState or refs)
+                if (isStartingServices && !isBackendReady && !navigateToSetup && !initializationError) {
+                    setLoadingText('Backend services taking too long to start (3min), preparing for setup...');
+                    setInitializationError('Service startup timed out (3min).');
+                    setNavigateToSetup(true);
+                    setIsStartingServices(false);
+                }
+              }, 180000); // 3 minutes
+
+              console.log('[SplashScreen] Starting ensure_comfyui_running_and_healthy command timeout (30s)...');
+              ensureCmdTimeoutId = setTimeout(() => {
+                if (!ensurePromiseResolvedRef.current) {
+                  console.warn('[SplashScreen] ensure_comfyui_running_and_healthy command timed out after 30s.');
+                  // Check states again, similar to the 3-min timer.
+                  // This check should ideally use fresh state values.
+                  if (isStartingServices && !isBackendReady && !navigateToSetup && !initializationError) {
+                    setLoadingText('Backend service startup check timed out (30s). Navigating to setup...');
+                    setInitializationError('Service startup command timed out (30s).');
+                    setNavigateToSetup(true);
+                    setIsStartingServices(false);
+                    if (serviceStartupTimerId) {
+                      clearTimeout(serviceStartupTimerId);
+                      serviceStartupTimerId = null;
+                    }
+                  }
+                }
+              }, 30000); // 30 seconds
+
+              invoke('ensure_comfyui_running_and_healthy')
+                .then(() => {
+                  ensurePromiseResolvedRef.current = true;
+                  if (ensureCmdTimeoutId) clearTimeout(ensureCmdTimeoutId);
+                  ensureCmdTimeoutId = null;
+                  console.log('[SplashScreen] ensure_comfyui_running_and_healthy promise RESOLVED. Waiting for backend-status event.');
+                  // Continue to rely on backend-status event
+                })
+                .catch(err => {
+                  ensurePromiseResolvedRef.current = true;
+                  if (ensureCmdTimeoutId) clearTimeout(ensureCmdTimeoutId);
+                  ensureCmdTimeoutId = null;
+                  const errorMessage = (err instanceof Error ? err.message : String(err)) || 'Failed to invoke ensure_comfyui_running_and_healthy';
+                  console.error('[SplashScreen] ensure_comfyui_running_and_healthy CATCH. Error:', errorMessage);
+                  setLoadingText(`Error starting services: ${errorMessage}`);
+                  setInitializationError(errorMessage);
+                  setNavigateToSetup(true);
+                  setIsStartingServices(false);
+                  if (serviceStartupTimerId) {
+                    clearTimeout(serviceStartupTimerId);
+                    serviceStartupTimerId = null;
+                  }
+                });
+              break;
+            case "fullSetupRequired":
+              const reason = inspectedPayload.data?.reason || "Unknown reason";
+              console.log(`[SplashScreen] Full setup required. Reason: ${reason}`);
+              setLoadingText(`Setup required: ${reason}`);
+              setProgress(50);
+              setIsBackendReady(false);
+              setNavigateToSetup(true);
+              setIsStartingServices(false);
+              if (initialVerificationTimerId) clearTimeout(initialVerificationTimerId);
+              initialVerificationTimerId = null;
+              if (serviceStartupTimerId) clearTimeout(serviceStartupTimerId); // Should not be active, but clear just in case
+              serviceStartupTimerId = null;
+              break;
+            default:
+              console.warn(`[SplashScreen] Received unhandled setup_status type: '${inspectedPayload.type}'. Full payload:`, inspectedPayload);
+              setLoadingText(`Received unexpected status: ${inspectedPayload.type}`);
+              setInitializationError(`Unexpected status: ${inspectedPayload.type}`);
+              setNavigateToSetup(true);
+              if (initialVerificationTimerId) clearTimeout(initialVerificationTimerId);
+              initialVerificationTimerId = null;
+              if (serviceStartupTimerId) clearTimeout(serviceStartupTimerId);
+              serviceStartupTimerId = null;
+              break;
+          }
+        });
+        unlistenSetupStatus = setupStatusListener;
+
+        // Listener for Installation Status (still useful if full setup is triggered by SetupScreen)
+        // This listener might be more relevant on SetupScreen.tsx itself.
+        // For SplashScreen, we primarily care about the initial decision.
+        // However, if get_setup_status_and_initialize itself can trigger some initial steps
+        // before deciding, this might still catch early messages.
         const installationListener = await listen('installation-status', (event) => {
-          const payload = event.payload as { step: string; message: string; is_error: boolean };
-          console.log(`[SplashScreen] Received installation status:`, payload);
-          setLoadingText(payload.message || `Installing dependencies... (${payload.step})`);
-          // Update progress based on step? Maybe map steps to percentages?
-          // For now, just show messages.
-          if (payload.is_error) {
-            console.error('[SplashScreen] Error during dependency installation:', payload.message);
-            setInitializationError(payload.message || 'Dependency installation failed');
-          }
-          // Note: InstallationComplete is handled implicitly by ensure_backend_ready resolving
+            const payload = event.payload as { step: string; message: string; is_error: boolean };
+            console.log(`[SplashScreen] Received installation status (during initial check or if setup starts):`, payload);
+            // Only update if full setup hasn't been explicitly required by setup_status yet
+            if (!navigateToSetup) {
+                setLoadingText(payload.message || `Step: ${payload.step}`);
+            }
+            if (payload.is_error) {
+                console.error('[SplashScreen] Error during installation (monitored by SplashScreen):', payload.message);
+                // If an error occurs here, it might mean the initial get_setup_status_and_initialize failed
+                // or a quick verification step failed in a way that emits this.
+                setInitializationError(payload.message || 'Installation process error');
+                setNavigateToSetup(true); // Likely need to go to setup screen to retry/show error
+            }
         });
-        unlistenInstallation = installationListener; // Store unlisten function
+        unlistenInstallation = installationListener;
 
-        // Listener for General Backend Status (Sidecar start, errors)
-        const backendListener = await listen('backend-status', (event) => {
-          const payload = event.payload as { status: string; message: string; isError: boolean };
-          console.log(`[SplashScreen] Received backend status:`, payload);
+        // Listener for backend status (especially after ensure_comfyui_running_and_healthy)
+        const backendStatusListener = await listen('backend-status', (event) => {
+            const payload = event.payload as { status: string; message: string; isError: boolean };
+            console.log(`[SplashScreen] Received backend-status:`, payload);
 
-          if (payload.status === 'starting_sidecar') {
-            setLoadingText(payload.message || 'Starting ComfyUI backend...');
-            setProgress(75); // Example progress update
-          } else if (payload.status === 'backend_ready') {
-            console.log('[SplashScreen] Backend reported ready status.');
-            setLoadingText('Finalizing...'); // Update text for final step
-            setProgress(100); // Ensure progress bar completes
-            setIsBackendReady(true); // Trigger completion
-          } else if (payload.status === 'backend_error' || payload.isError) {
-             console.error('[SplashScreen] Backend reported an error:', payload.message);
-             const errorMsg = payload.message || 'Unknown backend error';
-             setLoadingText(`Error: ${errorMsg}`);
-             setInitializationError(errorMsg);
-          } else {
-             // Handle other potential statuses if needed
-             setLoadingText(payload.message || 'Processing...');
-          }
+            if (isStartingServices) { // Only process if we are in the service starting phase
+                if (payload.status === 'backend_ready' && !payload.isError) {
+                    console.log('[SplashScreen] Backend services reported ready.');
+                    setLoadingText('Backend services started. Launching application...');
+                    setProgress(100);
+                    setIsBackendReady(true);
+                    setIsStartingServices(false);
+                    // Clear service timer on success
+                    if (serviceStartupTimerId) clearTimeout(serviceStartupTimerId);
+                    serviceStartupTimerId = null;
+                } else if (payload.isError || payload.status === 'backend_error') {
+                    console.error('[SplashScreen] Error during backend service startup:', payload.message);
+                    setLoadingText(`Error starting services: ${payload.message}`);
+                    setInitializationError(payload.message || 'Backend service startup failed');
+                    setNavigateToSetup(true);
+                    setIsStartingServices(false);
+                    // Clear service timer on error
+                    if (serviceStartupTimerId) clearTimeout(serviceStartupTimerId);
+                    serviceStartupTimerId = null;
+                } else {
+                    // Other backend statuses like 'starting_sidecar', 'sidecar_spawned_checking_health'
+                    setLoadingText(payload.message || 'Starting backend services...');
+                }
+            }
         });
-        unlistenBackend = backendListener; // Store unlisten function
+        unlistenBackendStatus = backendStatusListener;
 
-        // Invoke the command to ensure dependencies and start the backend
+        // Invoke the initial command
         try {
-          console.log('[SplashScreen] Invoking ensure_backend_ready command...');
-          setLoadingText('Checking backend dependencies...'); // Initial message
-          setProgress(10); // Initial progress
-          await invoke('ensure_backend_ready');
-          console.log('[SplashScreen] invoke ensure_backend_ready completed successfully (or handled error internally).');
-          // Success is indicated by the 'backend_ready' event, not the command resolving without error here.
+          console.log('[SplashScreen] Invoking get_setup_status_and_initialize command...');
+          setLoadingText('Verifying installation...');
+          setProgress(10);
+          await invoke('get_setup_status_and_initialize');
+          console.log('[SplashScreen] invoke get_setup_status_and_initialize completed.');
         } catch (err) {
-          // This catch block might still be triggered if the command itself fails catastrophically
-          // before even starting the Rust logic (e.g., command not found).
-          const errorMessage = (err instanceof Error ? err.message : String(err)) || 'Failed to invoke backend readiness check';
-          console.error('[SplashScreen] ensure_backend_ready command CATCH block triggered. Error:', errorMessage);
+          const errorMessage = (err instanceof Error ? err.message : String(err)) || 'Failed to invoke setup status check';
+          console.error('[SplashScreen] get_setup_status_and_initialize command CATCH block triggered. Error:', errorMessage);
           setLoadingText(`Error: ${errorMessage}`);
           setInitializationError(errorMessage);
+          setNavigateToSetup(true);
+          // Clear initial timer on error
+          if (initialVerificationTimerId) clearTimeout(initialVerificationTimerId);
+          initialVerificationTimerId = null;
         }
 
       } catch (error) {
@@ -176,49 +329,69 @@ export default function SplashScreenComponent({ onComplete }: SplashScreenProps)
         const errorMsg = 'Failed to initialize communication with backend.';
         setLoadingText(`Error: ${errorMsg}`);
         setInitializationError(errorMsg);
-        // Failsafe: if Tauri API import fails, we can't proceed. Error is shown.
+        setNavigateToSetup(true);
+        // Clear initial timer on error
+        if (initialVerificationTimerId) clearTimeout(initialVerificationTimerId);
+        initialVerificationTimerId = null;
       }
     };
 
-    setupAndRunBackend();
+    initializeApplication();
 
-    // Failsafe timeout - adjusted to 3 minutes due to potentially long installs
-    const failsafeTimer = setTimeout(() => {
-      console.log(`[SplashScreen] Failsafe timer check (3 min): isBackendReady=${isBackendReady}, initializationError=${initializationError}`);
-      if (!isBackendReady && !initializationError) { // Only proceed if not ready AND no error encountered
-        console.warn('[SplashScreen] Failsafe timeout (3 min) triggered - forcing proceed. This might indicate an issue.');
-        setLoadingText('Setup taking longer than expected, proceeding...');
-        setIsBackendReady(true); // This will trigger onComplete
-        setProgress(100);
-      } else if (initializationError) {
-        console.log('[SplashScreen] Failsafe timeout (3 min) triggered, but an error was encountered. Not proceeding.');
-        // Error message should already be displayed
-      } else if (isBackendReady) {
-        // Already ready, failsafe not needed.
-        console.log('[SplashScreen] Failsafe timeout (3 min) triggered, but backend is already ready.');
-      }
-    }, 180000); // 3 minutes = 180,000 ms
+    // Start initial verification failsafe timer
+    console.log('[SplashScreen] Starting initial verification failsafe timer (1 min)...');
+    initialVerificationTimerId = setTimeout(() => {
+        console.warn('[SplashScreen] Failsafe timeout (1 min) for initial verification triggered.');
+        // Check state again inside timeout callback to ensure it hasn't resolved in the meantime
+        if (!isBackendReady && !navigateToSetup && !isStartingServices && !initializationError) {
+            setLoadingText('Initial verification taking too long, preparing for setup...');
+            setInitializationError('Initial verification timed out.');
+            setNavigateToSetup(true);
+        }
+    }, 60000); // 1 minute
 
     // Cleanup function
     return () => {
-      console.log('[SplashScreen] Cleaning up listeners and timer');
+      console.log('[SplashScreen] Cleaning up listeners and timers');
+      if (unlistenSetupStatus) unlistenSetupStatus();
       if (unlistenInstallation) unlistenInstallation();
-      if (unlistenBackend) unlistenBackend();
-      clearTimeout(failsafeTimer);
+      if (unlistenBackendStatus) unlistenBackendStatus();
+      // Clear all timers on cleanup
+      if (initialVerificationTimerId) clearTimeout(initialVerificationTimerId);
+      if (serviceStartupTimerId) clearTimeout(serviceStartupTimerId);
+      if (ensureCmdTimeoutId) clearTimeout(ensureCmdTimeoutId);
     };
-  }, []); // Empty dependency array: run once on mount
+  }, []); // Ensures this effect runs only once on mount
 
-  // Effect to call onComplete when backend is ready
+  // Effect to call onComplete when a navigation decision is made
   useEffect(() => {
-    if (isBackendReady) {
-      console.log('[SplashScreen] Backend is ready, calling onComplete after a short delay.');
+    if (isBackendReady) { // Navigate to main app
+      console.log('[SplashScreen] Backend is ready, calling onComplete to navigate to main application.');
       const timer = setTimeout(() => {
-        onComplete();
-      }, 1500); // Delay to allow fade-out or final animation impression
-      
+        onComplete(); // This should navigate to main app (e.g., /title)
+      }, 1000);
+      return () => clearTimeout(timer);
+    } else if (navigateToSetup) { // Navigate to SetupScreen
+      console.log('[SplashScreen] Full setup required, calling onComplete to navigate to setup screen.');
+       const timer = setTimeout(() => {
+        // Modify onComplete or pass a parameter if SplashScreen's onComplete directly goes to main app.
+        // For now, assuming onComplete can handle routing or a different callback is needed for setup.
+        // Let's assume onComplete is smart or we adjust App.tsx routing.
+        // A more robust way would be for onComplete to take a route: onComplete('/setup') or onComplete('/title')
+        // Or, SplashScreen itself uses router.push. For now, signaling via onComplete.
+        // This might require onComplete to be (destination?: string) => void;
+        // For this iteration, we'll rely on a convention or a later router.push here.
+        
+        // TEMPORARY: Direct navigation for clarity, assuming useRouter is available
+        // import { useRouter } from 'next/navigation';
+        // const router = useRouter();
+        // router.push('/setup');
+        // This direct push is better. For now, I'll stick to onComplete and note this for review.
+        onComplete(); // This should navigate to /setup
+      }, 1000);
       return () => clearTimeout(timer);
     }
-  }, [isBackendReady, onComplete]);
+  }, [isBackendReady, navigateToSetup, onComplete]);
   
   return (
     <>

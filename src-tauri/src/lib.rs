@@ -1,5 +1,6 @@
 use std::env;
 use std::path::PathBuf; // Import PathBuf
+use tauri::Listener;
 use tauri::{Manager, Url}; // Import Url
 use std::thread;
 use std::time::Duration;
@@ -50,35 +51,43 @@ pub fn run() {
               Ok(_) => {
                   log::info!("[STARTUP] Main window shown with loading.html in {:?}", window_start.elapsed());
                   
-                  // Introduce a small delay to ensure loading.html is visible
-                  thread::sleep(Duration::from_millis(300));
-                  log::info!("[STARTUP] Delay complete, proceeding with navigation.");
+                  let main_window_clone_for_nav = window.clone();
+                  let app_handle_clone_for_nav = app_handle_clone.clone();
 
-                  let window_clone = window.clone(); // Clone window for use in async task
                   tauri::async_runtime::spawn(async move {
+                      let delay_duration = Duration::from_millis(500);
+                      log::info!("[STARTUP_ASYNC] Starting {:?} delay before navigation to allow loading.html to render.", delay_duration);
+                      tokio::time::sleep(delay_duration).await; // Re-add or ensure this delay
+                      log::info!("[STARTUP_ASYNC] Delay complete. Proceeding with navigation.");
+
                       let navigation_start = std::time::Instant::now();
+                      log::info!("[STARTUP_ASYNC] Initiating navigation logic at {:?}", navigation_start);
                       if cfg!(dev) {
                           // --- DEBUG MODE ---
-                          if let Some(dev_url) = app_handle_clone.config().build.dev_url.clone() {
+                          if let Some(dev_url) = app_handle_clone_for_nav.config().build.dev_url.clone() {
+                              // dev_url is already a tauri::Url, no need to parse
                               log::info!("[STARTUP_ASYNC] Navigating to Next.js dev server: {}", dev_url);
-                              match window_clone.navigate(dev_url) { // Navigate using the tauri::Url directly
-                                  Ok(_) => log::info!("[STARTUP_ASYNC] Navigation to dev server initiated in {:?}", navigation_start.elapsed()),
-                                  Err(e) => log::error!("[STARTUP_ASYNC] Failed to navigate to dev server: {}", e),
+                              let url_to_log = dev_url.clone(); // Clone for logging if needed after move
+                              match main_window_clone_for_nav.navigate(dev_url) { // dev_url is moved here
+                                  Ok(_) => log::info!("[STARTUP_ASYNC] Navigation to dev server {} initiated in {:?}", url_to_log, navigation_start.elapsed()),
+                                  Err(e) => log::error!("[STARTUP_ASYNC] Failed to navigate to dev server {}: {}", url_to_log, e),
                               }
                           } else {
                               log::error!("[STARTUP_ASYNC] dev_url is None in tauri.conf.json!");
-                              // Optionally show an error to the user or fallback
                           }
                       } else {
                           // --- RELEASE MODE ---
-                          // Parse the relative path string into a tauri::Url
-                          let prod_path_str = "splash.html"; // Relative path for bundled asset
+                          // For Next.js, navigating to "/splash" should work if routing is set up.
+                          // If splash.html is a static export at the root, "splash.html" is correct.
+                          // Using "/splash" as it's more standard for Next.js SPA routing.
+                          let prod_path_str = "/splash";
                           match Url::parse(prod_path_str) {
                               Ok(prod_url) => {
                                   log::info!("[STARTUP_ASYNC] Navigating to Next.js production path: {}", prod_url);
-                                  match window_clone.navigate(prod_url) { // Navigate using the parsed tauri::Url
-                                      Ok(_) => log::info!("[STARTUP_ASYNC] Navigation to production path initiated in {:?}", navigation_start.elapsed()),
-                                      Err(e) => log::error!("[STARTUP_ASYNC] Failed to navigate to production path: {}", e),
+                                  let url_to_log = prod_url.clone(); // Clone for logging
+                                  match main_window_clone_for_nav.navigate(prod_url) {
+                                      Ok(_) => log::info!("[STARTUP_ASYNC] Navigation to production path {} initiated in {:?}", url_to_log, navigation_start.elapsed()),
+                                      Err(e) => log::error!("[STARTUP_ASYNC] Failed to navigate to production path {}: {}", url_to_log, e),
                                   }
                               }
                               Err(e) => {
@@ -90,7 +99,7 @@ pub fn run() {
 
                   // Log window properties
                   if let Ok(size) = window.inner_size() {
-                      log::info!("[STARTUP] Window size: {}x{}", size.width, size.height);
+                      log::info!("[STARTUP] Window size after setup: {}x{}", size.width, size.height);
                   }
               },
               Err(e) => {
@@ -114,8 +123,10 @@ pub fn run() {
       setup::check_initialization_status,
       setup::start_application_setup, // This might become obsolete or change purpose
       setup::retry_application_setup, // This might become obsolete or change purpose
+      setup::get_setup_status_and_initialize, // New command for setup lifecycle
       // Register the new backend readiness command
-      comfyui_sidecar::ensure_backend_ready
+      comfyui_sidecar::ensure_backend_ready,
+      comfyui_sidecar::ensure_comfyui_running_and_healthy // New command for SplashScreen
     ])
     .on_window_event(|window, event| match event {
         tauri::WindowEvent::Destroyed => {

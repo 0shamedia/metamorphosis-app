@@ -43,15 +43,16 @@ const styles = `
 // Setup phases in order (from existing)
 type SetupPhase = 'checking' | 'installing_comfyui' | 'python_setup' | 'downloading_models' | 'finalizing' | 'complete' | 'error';
 
-interface SetupProgress {
+interface SetupProgress { // This should align with Rust's SetupProgressPayload
   phase: SetupPhase;
   currentStep: string;
-  progress: number; // Overall progress of the current phase
-  detailMessage: string;
-  error?: string;
+  progress: number; // Progress of the current phase (0-100)
+  detailMessage?: string; // Optional
+  error?: string; // Optional
 }
 
 // Individual model download status (from existing)
+// This might become obsolete if `setup-progress` for 'downloading_models' is sufficient.
 interface ModelStatus {
   id: string;
   name: string;
@@ -111,10 +112,10 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
     phase: 'checking',
     currentStep: 'Checking system requirements...',
     progress: 0,
-    detailMessage: 'Preparing to set up Metamorphosis...'
+    detailMessage: 'Preparing to set up Metamorphosis...' // Default detail message
   });
   
-  const [models, setModels] = useState<ModelStatus[]>([]);
+  // const [models, setModels] = useState<ModelStatus[]>([]); // Comment out if relying solely on setup-progress
   const [overallProgressDisplay, setOverallProgressDisplay] = useState(0); // For the main progress bar
 
   const setupStartedRef = useRef(false);
@@ -148,20 +149,21 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
     }
     
     const currentPhaseWeight = weights[setupProgress.phase] || 0;
-    // For 'downloading_models', phase progress is average of model progresses
-    let currentPhaseSpecificProgress = setupProgress.progress;
-    if (setupProgress.phase === 'downloading_models' && models.length > 0) {
-        const totalModelProgress = models.reduce((sum, model) => sum + model.progress, 0);
-        currentPhaseSpecificProgress = totalModelProgress / models.length;
-    }
+    // The `setupProgress.progress` from the backend now directly represents the phase's progress (0-100)
+    const currentPhaseSpecificProgress = setupProgress.progress;
+
+    // if (setupProgress.phase === 'downloading_models' && models.length > 0) {
+    //     const totalModelProgress = models.reduce((sum, model) => sum + model.progress, 0);
+    //     currentPhaseSpecificProgress = totalModelProgress / models.length;
+    // }
 
     calculatedProgress += (currentPhaseSpecificProgress / 100) * currentPhaseWeight;
     return Math.round(calculatedProgress);
-  }, [setupProgress.phase, setupProgress.progress, models, overallProgressDisplay]);
+  }, [setupProgress.phase, setupProgress.progress, overallProgressDisplay]); // Removed models from dependencies
 
   useEffect(() => {
     setOverallProgressDisplay(calculateOverallProgress());
-  }, [setupProgress, models, calculateOverallProgress]);
+  }, [setupProgress, calculateOverallProgress]); // Removed models from dependencies
 
 
   // Simulate the setup process (from existing, kept for fallback)
@@ -180,29 +182,29 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
     const interval = setInterval(() => {
       currentPhaseProgress += 20; // Simulate progress within the current phase
       
-      let activeModelSimulation = false;
-      if (setupProgress.phase === 'downloading_models') {
-          activeModelSimulation = true;
-          // Simulate model download progress
-          setModels(prevModels => {
-              const newModels = [...prevModels];
-              const downloadingModelIndex = newModels.findIndex(m => m.status === 'downloading');
-              if (downloadingModelIndex !== -1) {
-                  newModels[downloadingModelIndex].progress = Math.min(newModels[downloadingModelIndex].progress + 10, 100);
-                  if (newModels[downloadingModelIndex].progress === 100) {
-                      newModels[downloadingModelIndex].status = 'completed';
-                      const nextQueuedIndex = newModels.findIndex(m => m.status === 'queued');
-                      if (nextQueuedIndex !== -1) newModels[nextQueuedIndex].status = 'downloading';
-                  }
-              } else {
-                  const firstQueued = newModels.findIndex(m => m.status === 'queued');
-                  if (firstQueued !== -1) newModels[firstQueued].status = 'downloading';
-              }
-              return newModels;
-          });
-          // If all models are complete, then this phase's progress is 100
-          if (models.every(m => m.status === 'completed')) currentPhaseProgress = 100;
-      }
+      // let activeModelSimulation = false; // Model simulation part of fallback can be simplified
+      // if (setupProgress.phase === 'downloading_models') {
+      //     activeModelSimulation = true;
+      //     // Simulate model download progress
+      //     setModels(prevModels => {
+      //         const newModels = [...prevModels];
+      //         const downloadingModelIndex = newModels.findIndex(m => m.status === 'downloading');
+      //         if (downloadingModelIndex !== -1) {
+      //             newModels[downloadingModelIndex].progress = Math.min(newModels[downloadingModelIndex].progress + 10, 100);
+      //             if (newModels[downloadingModelIndex].progress === 100) {
+      //                 newModels[downloadingModelIndex].status = 'completed';
+      //                 const nextQueuedIndex = newModels.findIndex(m => m.status === 'queued');
+      //                 if (nextQueuedIndex !== -1) newModels[nextQueuedIndex].status = 'downloading';
+      //             }
+      //         } else {
+      //             const firstQueued = newModels.findIndex(m => m.status === 'queued');
+      //             if (firstQueued !== -1) newModels[firstQueued].status = 'downloading';
+      //         }
+      //         return newModels;
+      //     });
+      //     // If all models are complete, then this phase's progress is 100
+      //     // if (models.every(m => m.status === 'completed')) currentPhaseProgress = 100;
+      // }
 
 
       if (currentPhaseProgress >= 100) {
@@ -213,9 +215,9 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
           setTimeout(() => onComplete(), 3000);
           return;
         }
-        if (phasesForSim[phaseIndex] === 'downloading_models' && models.length === 0) {
-            setModels(mockModelsData); // Initialize models for simulation
-        }
+        // if (phasesForSim[phaseIndex] === 'downloading_models' && models.length === 0) {
+        //     // setModels(mockModelsData); // Initialize models for simulation
+        // }
       }
       
       const currentSimPhase = phasesForSim[phaseIndex];
@@ -223,13 +225,13 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
         ...prev,
         phase: currentSimPhase,
         currentStep: `${phaseNames[currentSimPhase]} in progress...`,
-        progress: activeModelSimulation ? prev.progress : currentPhaseProgress, // Use model progress if in that phase
-        detailMessage: `Working on ${phaseNames[currentSimPhase]}... ${activeModelSimulation ? '' : currentPhaseProgress}%`
+        progress: currentPhaseProgress, // Simplified progress for simulation
+        detailMessage: `Working on ${phaseNames[currentSimPhase]}... ${currentPhaseProgress}%`
       }));
 
     }, 1500);
     return () => clearInterval(interval);
-  }, [onComplete, models, setupProgress.phase]); // Removed phaseNames from dependency array
+  }, [onComplete, phaseNames]); // Removed models, setupProgress.phase from dependency array
 
   useEffect(() => {
     console.log('[SetupScreen] Component mounted.');
@@ -249,14 +251,14 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
           }
         });
         
-        const unlistenModels = await listen('model-download-status', (event) => {
-          const payload = event.payload as { models: ModelStatus[] };
-          setModels(payload.models);
-        });
+        // const unlistenModels = await listen('model-download-status', (event) => {
+        //   const payload = event.payload as { models: ModelStatus[] };
+        //   setModels(payload.models);
+        // }); // Commented out model-download-status listener
         
         await invoke('start_application_setup');
         
-        return () => { unlistenSetup(); unlistenModels(); };
+        return () => { unlistenSetup(); /* unlistenModels(); */ }; // Commented out unlistenModels
       } catch (error) {
         console.error('[SetupScreen] Tauri API interaction failed:', error);
         setSetupProgress(prev => ({ ...prev, phase: 'error', error: 'Failed to connect to backend. Using simulation.' }));
@@ -272,7 +274,7 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       setSetupProgress({ phase: 'checking', currentStep: 'Retrying setup...', progress: 0, detailMessage: 'Attempting to restart setup process...' });
-      setModels([]); // Reset models
+      // setModels([]); // Reset models - commented out
       setupStartedRef.current = false; // Allow setup to start again
       await invoke('retry_application_setup');
     } catch (error) {
@@ -365,26 +367,21 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
                   <div className="flex justify-between mb-2">
                     <span className="text-sm font-medium text-gray-700">Current Step Progress</span>
                     <span className="text-sm font-medium text-purple-700">
-                      {setupProgress.phase === 'downloading_models' && models.length > 0 ? 
-                       Math.round(models.reduce((sum, m) => sum + m.progress, 0) / models.length) :
-                       Math.round(setupProgress.progress)
-                      }%
+                      {Math.round(setupProgress.progress)}%
                     </span>
                   </div>
                   <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className="h-full bg-purple-600 transition-all duration-300 ease-out"
-                      style={{ width: `${
-                        setupProgress.phase === 'downloading_models' && models.length > 0 ? 
-                        Math.round(models.reduce((sum, m) => sum + m.progress, 0) / models.length) :
-                        setupProgress.progress
-                      }%` }}
+                      style={{ width: `${setupProgress.progress}%` }}
                     ></div>
                   </div>
                 </div>
               )}
               
-              {setupProgress.phase === 'downloading_models' && models.length > 0 && (
+              {/* Model download specific UI section - can be removed or adapted if setup-progress detailMessage is sufficient */}
+              {/* For now, let's assume detailMessage from setup-progress will cover model download info */}
+              {/* {setupProgress.phase === 'downloading_models' && models.length > 0 && (
                 <div className="bg-gray-50 rounded-lg p-4">
                   <h3 className="font-medium text-gray-700 mb-3">Model Downloads</h3>
                   <div className="space-y-4">
@@ -393,20 +390,20 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
                         <div className="flex items-center justify-between mb-2">
                           <span className="font-medium text-gray-800">{model.name}</span>
                           <span className={`text-xs px-2 py-0.5 rounded-full ${
-                            model.status === 'completed' ? 'bg-green-100 text-green-800' : 
-                            model.status === 'downloading' ? 'bg-blue-100 text-blue-800' : 
+                            model.status === 'completed' ? 'bg-green-100 text-green-800' :
+                            model.status === 'downloading' ? 'bg-blue-100 text-blue-800' :
                             'bg-gray-100 text-gray-800'
                           }`}>
-                            {model.status === 'completed' ? 'Complete' : 
+                            {model.status === 'completed' ? 'Complete' :
                              model.status === 'downloading' ? `Downloading ${Math.round(model.progress)}%` :
                              model.status === 'error' ? `Error: ${model.errorMessage || 'Failed'}` :
                              'Queued'}
                           </span>
                         </div>
                         <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                          <div 
+                          <div
                             className={`h-full ${
-                              model.status === 'completed' ? 'bg-green-500' : 
+                              model.status === 'completed' ? 'bg-green-500' :
                               model.status === 'downloading' ? 'bg-blue-500' :
                               model.status === 'error' ? 'bg-red-500' :
                               'bg-gray-300'
@@ -418,7 +415,7 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
                     ))}
                   </div>
                 </div>
-              )}
+              )} */}
               
               {setupProgress.phase === 'complete' && (
                 <div className="bg-green-50 rounded-lg p-6 text-center">

@@ -1,14 +1,53 @@
-use tauri::{Window, AppHandle, Manager}; // Import Manager
+use tauri::WebviewWindow;
+use tauri::{Window, AppHandle, Manager, Wry}; // Import Manager, Wry
 use tauri::Emitter; // Add this to import the Emitter trait
 use serde_json::json;
 use log::{error, info};
 use std::time::Duration;
 use tokio::time::sleep;
-// use crate::dependency_management; // No longer needed for these path functions
 use std::path::PathBuf; // Added for path operations
 use std::fs; // Added for directory creation
+use serde::Serialize; // For SetupProgressPayload
 
-// Setup phases
+use crate::dependency_management; // For calling actual installation
+use crate::comfyui_sidecar; // For calling actual sidecar start
+
+// Unified Setup Progress Payload
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupProgressPayload {
+    phase: String,
+    current_step: String,
+    progress: u8, // 0-100
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+// Helper to emit unified setup progress
+pub fn emit_setup_progress(
+    app_handle: &AppHandle<Wry>,
+    phase: &str,
+    current_step: &str,
+    progress: u8,
+    detail_message: Option<String>,
+    error: Option<String>,
+) {
+    let payload = SetupProgressPayload {
+        phase: phase.to_string(),
+        current_step: current_step.to_string(),
+        progress,
+        detail_message,
+        error,
+    };
+    if let Err(e) = app_handle.emit("setup-progress", payload) {
+        error!("Failed to emit setup-progress event: {}", e);
+    }
+}
+
+
+// Setup phases (kept for reference, but string literals will be used in emit_setup_progress)
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum SetupPhase {
     Checking,
@@ -20,21 +59,7 @@ pub enum SetupPhase {
     Error,
 }
 
-impl SetupPhase {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            SetupPhase::Checking => "checking",
-            SetupPhase::InstallingComfyui => "installing_comfyui",
-            SetupPhase::PythonSetup => "python_setup",
-            SetupPhase::DownloadingModels => "downloading_models",
-            SetupPhase::Finalizing => "finalizing",
-            SetupPhase::Complete => "complete",
-            SetupPhase::Error => "error",
-        }
-    }
-}
-
-// Model download status
+// Model download status (may become obsolete if model download is fully integrated into setup-progress)
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum ModelStatus {
     Queued,
@@ -44,19 +69,7 @@ pub enum ModelStatus {
     Error,
 }
 
-impl ModelStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ModelStatus::Queued => "queued",
-            ModelStatus::Downloading => "downloading",
-            ModelStatus::Verifying => "verifying",
-            ModelStatus::Completed => "completed",
-            ModelStatus::Error => "error",
-        }
-    }
-}
-
-// Model information
+// Model information (may become obsolete)
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ModelInfo {
     pub id: String,
@@ -67,8 +80,9 @@ pub struct ModelInfo {
     pub error_message: Option<String>,
 }
 
+
 #[tauri::command]
-pub async fn check_initialization_status(window: Window) -> Result<(), String> {
+pub async fn check_initialization_status(window: WebviewWindow) -> Result<(), String> {
     // Record start time for performance tracking
     let start_time = std::time::Instant::now();
     info!("[SETUP] check_initialization_status started");
@@ -273,237 +287,262 @@ pub async fn check_initialization_status(window: Window) -> Result<(), String> {
 
 /// Start the application setup process
 #[tauri::command]
-pub async fn start_application_setup(window: Window) -> Result<(), String> {
+pub async fn start_application_setup(app_handle: AppHandle<Wry>) -> Result<(), String> {
     // Spawn the setup process in the background
-    let win = window.clone();
+    let handle_clone = app_handle.clone();
     tauri::async_runtime::spawn(async move {
-        // Run the setup process
-        if let Err(e) = run_setup_process(win).await {
-            error!("Setup process failed: {}", e);
-            // Notify the frontend of the error
-            if let Err(emit_err) = window.emit("setup-progress", json!({
-                "phase": "error",
-                "currentStep": "Setup error",
-                "progress": 0,
-                "detailMessage": "Failed to complete setup",
-                "error": e
-            })) {
-                error!("Failed to emit setup error: {}", emit_err);
-            }
+        if let Err(e) = orchestrate_full_setup(handle_clone.clone()).await { // Clone handle_clone for orchestrate_full_setup
+            error!("Full setup orchestration failed: {}", e);
+            // Notify the frontend of the error using the new helper
+             emit_setup_progress(
+                &handle_clone, // Use the cloned handle for emitting error
+                "error",
+                "Critical Setup Error",
+                0,
+                Some("The application setup encountered a critical error and could not complete.".to_string()),
+                Some(e.clone()), // Send the error message
+            );
         }
     });
     
     Ok(())
 }
 
-/// Retry the application setup process
-#[tauri::command]
-pub async fn retry_application_setup(window: Window) -> Result<(), String> {
-    start_application_setup(window).await
+/// Orchestrates the entire application setup process.
+async fn orchestrate_full_setup(app_handle: AppHandle<Wry>) -> Result<(), String> {
+    info!("Starting full application setup orchestration...");
+
+    // Attempt to stop any existing ComfyUI sidecar process first
+    info!("[SETUP] Attempting to stop any pre-existing ComfyUI sidecar process...");
+    comfyui_sidecar::stop_comfyui_sidecar(); // Call the public stop function
+    info!("[SETUP] Pre-existing ComfyUI sidecar stop attempt complete.");
+
+    // Phase 1: Checking (Initial system checks, disk space etc.)
+    emit_setup_progress(&app_handle, "checking", "Starting system checks...", 0, None, None);
+    // Actual checks from check_initialization_status can be integrated or called here.
+    // For now, simulate a brief check.
+    // Getting the main window to pass to check_initialization_status
+    let main_window = app_handle.get_webview_window("main").ok_or_else(|| {
+        let msg = "Failed to get main window for initial checks".to_string();
+        error!("{}", msg);
+        msg
+    })?;
+    match check_initialization_status(main_window).await {
+        Ok(_) => emit_setup_progress(&app_handle, "checking", "System checks complete.", 100, None, None),
+        Err(e) => {
+            let err_msg = format!("Initial system checks failed: {}", e);
+            error!("{}", err_msg);
+            emit_setup_progress(&app_handle, "error", "System Check Failed", 0, Some(err_msg.clone()), Some(e));
+            return Err(err_msg);
+        }
+    }
+
+    // Phase 2 & 3: Python Environment & ComfyUI Dependencies
+    emit_setup_progress(&app_handle, "python_setup", "Initializing Python environment setup...", 0, None, None);
+    match dependency_management::install_python_dependencies_with_progress(&app_handle).await {
+        Ok(_) => {
+            info!("Python dependencies installed successfully.");
+            emit_setup_progress(&app_handle, "python_setup", "Python environment setup complete.", 100, None, None);
+        }
+        Err(e) => {
+            let err_msg = format!("Python dependency installation failed: {}", e);
+            error!("{}", err_msg);
+            emit_setup_progress(&app_handle, "error", "Python Setup Failed", 0, Some(err_msg.clone()), Some(e.to_string()));
+            return Err(err_msg);
+        }
+    }
+
+    // Phase 4: Downloading Models (Simulated for now, to be replaced with actual logic)
+    emit_setup_progress(&app_handle, "downloading_models", "Preparing to download AI models...", 0, None, None);
+    let models_to_download = vec!["Stable Diffusion v1.5", "VAE Model", "Character Base LoRA"];
+    let num_models = models_to_download.len();
+    if num_models > 0 { 
+        for (idx, model_name) in models_to_download.iter().enumerate() {
+            let phase_start_progress = ((idx * 100) / num_models) as u8;
+            emit_setup_progress(&app_handle, "downloading_models", &format!("Starting download: {}", model_name), phase_start_progress, None, None);
+            for progress_step in 1..=10 {
+                sleep(Duration::from_millis(150)).await; 
+                let model_progress_percent = progress_step * 10;
+                let overall_phase_progress = (((idx * 100) + model_progress_percent) / num_models) as u8;
+                emit_setup_progress(
+                    &app_handle,
+                    "downloading_models",
+                    &format!("Downloading {} ({}%)", model_name, model_progress_percent),
+                    overall_phase_progress.min(100), 
+                    Some(format!("Downloading {} - {}MB / {}MB", model_name, model_progress_percent * 5, 500)), 
+                    None,
+                );
+            }
+            let phase_end_progress = (((idx + 1) * 100) / num_models) as u8;
+            emit_setup_progress(&app_handle, "downloading_models", &format!("Finished download: {}", model_name), phase_end_progress.min(100), None, None);
+        }
+    }
+    emit_setup_progress(&app_handle, "downloading_models", "All models downloaded.", 100, None, None);
+
+
+    // Phase 5: Finalizing (Starting ComfyUI Sidecar and Health Check)
+    emit_setup_progress(&app_handle, "finalizing", "Starting ComfyUI services...", 0, None, None);
+    match comfyui_sidecar::spawn_and_health_check_comfyui(&app_handle).await {
+        Ok(_) => {
+            info!("ComfyUI services started and healthy.");
+            emit_setup_progress(&app_handle, "finalizing", "ComfyUI services healthy.", 100, None, None);
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to start or health check ComfyUI services: {}", e);
+            error!("{}", err_msg);
+            emit_setup_progress(&app_handle, "error", "ComfyUI Service Failed", 0, Some(err_msg.clone()), Some(e.to_string()));
+            return Err(err_msg);
+        }
+    }
+
+    // Phase 6: Complete
+    // Create Master Installation Marker File
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        let err_msg = format!("Failed to get app data dir for master marker: {}", e);
+        error!("{}", err_msg);
+        err_msg
+    })?;
+    if !app_data_dir.exists() {
+        fs::create_dir_all(&app_data_dir).map_err(|e| {
+            let err_msg = format!("Failed to create app data dir for master marker at {:?}: {}", app_data_dir, e);
+            error!("{}", err_msg);
+            err_msg
+        })?;
+    }
+    let master_marker_path = app_data_dir.join("metamorphosis_setup_complete.marker");
+    fs::write(&master_marker_path, "setup_completed_successfully").map_err(|e| {
+        let err_msg = format!("Failed to write master installation marker at {:?}: {}", master_marker_path, e);
+        error!("{}", err_msg);
+        err_msg
+    })?;
+    info!("Master Installation Marker File created at {}", master_marker_path.display());
+
+    emit_setup_progress(&app_handle, "complete", "Setup complete. Ready to launch!", 100, None, None);
+    info!("Full application setup orchestration completed successfully.");
+    Ok(())
 }
 
-/// The actual setup process implementation
-async fn run_setup_process(window: Window) -> Result<(), String> {
-    // 1. System Check Phase
-    window.emit("setup-progress", json!({
-        "phase": "checking",
-        "currentStep": "Checking system requirements",
-        "progress": 0,
-        "detailMessage": "Verifying system compatibility..."
-    })).map_err(|e| e.to_string())?;
-    
-    // Simulate some check work
-    for i in 1..=5 {
-        sleep(Duration::from_millis(300)).await;
-        window.emit("setup-progress", json!({
-            "phase": "checking",
-            "currentStep": "Checking system requirements",
-            "progress": i * 20,
-            "detailMessage": format!("Verifying system compatibility... ({}%)", i * 20)
-        })).map_err(|e| e.to_string())?;
+
+/// Retry the application setup process
+#[tauri::command]
+pub async fn retry_application_setup(app_handle: AppHandle<Wry>) -> Result<(), String> {
+    start_application_setup(app_handle).await
+}
+
+// The old run_setup_process function is now removed as its logic is replaced by orchestrate_full_setup
+// and calls to actual implementation modules.
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(tag = "type", content = "data")]
+#[serde(rename_all = "camelCase")]
+pub enum SetupStatusEvent {
+    BackendFullyVerifiedAndReady,
+    FullSetupRequired { reason: String },
+}
+
+fn get_comfyui_vendor_paths(app_handle: &AppHandle<Wry>) -> Result<(PathBuf, PathBuf, PathBuf), String> {
+    let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get current exe path: {}", e))?;
+    let exe_dir = exe_path.parent().ok_or_else(|| "Failed to get executable directory".to_string())?;
+
+    let base_path = if cfg!(debug_assertions) {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .ok_or_else(|| "Failed to get parent of CARGO_MANIFEST_DIR".to_string())?
+            .join("target")
+            .join("debug")
+            .join("vendor")
+    } else {
+        exe_dir.join("vendor")
+    };
+
+    let comfyui_dir = base_path.join("comfyui");
+    let venv_dir = comfyui_dir.join(".venv");
+    let venv_python_executable = if cfg!(target_os = "windows") {
+        venv_dir.join("Scripts").join("python.exe")
+    } else {
+        venv_dir.join("bin").join("python")
+    };
+    Ok((comfyui_dir, venv_dir, venv_python_executable))
+}
+
+
+async fn run_quick_verification(app_handle: &AppHandle<Wry>) -> Result<bool, String> {
+    info!("[QUICK VERIFY] Starting quick verification process...");
+
+    let (comfyui_dir, venv_dir, venv_python_executable) = get_comfyui_vendor_paths(app_handle)?;
+
+    // 1. Venv Integrity: Check .venv directory
+    if !venv_dir.exists() || !venv_dir.is_dir() {
+        info!("[QUICK VERIFY] FAILED: .venv directory not found at {}", venv_dir.display());
+        return Ok(false);
     }
-    
-    // 2. ComfyUI Installation Phase
-    window.emit("setup-progress", json!({
-        "phase": "installing_comfyui",
-        "currentStep": "Installing ComfyUI",
-        "progress": 0,
-        "detailMessage": "Preparing ComfyUI installation..."
-    })).map_err(|e| e.to_string())?;
-    
-    // THIS IS WHERE YOUR ACTUAL COMFYUI INSTALLATION CODE WOULD GO
-    // For now, we'll just simulate the progress
-    for i in 1..=10 {
-        sleep(Duration::from_millis(300)).await;
-        window.emit("setup-progress", json!({
-            "phase": "installing_comfyui",
-            "currentStep": "Installing ComfyUI",
-            "progress": i * 10,
-            "detailMessage": format!("Installing ComfyUI... ({}%)", i * 10)
-        })).map_err(|e| e.to_string())?;
+    info!("[QUICK VERIFY] PASSED: .venv directory exists at {}", venv_dir.display());
+
+    // 2. Venv Integrity: Check Python executable within .venv
+    if !venv_python_executable.exists() || !venv_python_executable.is_file() {
+        info!("[QUICK VERIFY] FAILED: Python executable not found in .venv at {}", venv_python_executable.display());
+        return Ok(false);
     }
-    
-    // 3. Python Setup Phase
-    window.emit("setup-progress", json!({
-        "phase": "python_setup",
-        "currentStep": "Setting up Python environment",
-        "progress": 0,
-        "detailMessage": "Preparing Python environment..."
-    })).map_err(|e| e.to_string())?;
-    
-    // THIS IS WHERE YOUR ACTUAL PYTHON SETUP CODE WOULD GO
-    // For now, we'll just simulate the progress
-    for i in 1..=10 {
-        sleep(Duration::from_millis(300)).await;
-        window.emit("setup-progress", json!({
-            "phase": "python_setup",
-            "currentStep": "Setting up Python environment",
-            "progress": i * 10,
-            "detailMessage": format!("Installing Python dependencies... ({}%)", i * 10)
-        })).map_err(|e| e.to_string())?;
+    info!("[QUICK VERIFY] PASSED: Python executable exists in .venv at {}", venv_python_executable.display());
+
+    // 3. Critical File Existence: Check for vendor/comfyui/main.py
+    let main_py_path = comfyui_dir.join("main.py");
+    if !main_py_path.exists() || !main_py_path.is_file() {
+        info!("[QUICK VERIFY] FAILED: main.py not found at {}", main_py_path.display());
+        return Ok(false);
     }
+    info!("[QUICK VERIFY] PASSED: main.py exists at {}", main_py_path.display());
     
-    // 4. Model Download Phase
-    window.emit("setup-progress", json!({
-        "phase": "downloading_models",
-        "currentStep": "Downloading required models",
-        "progress": 0,
-        "detailMessage": "Preparing to download AI models..."
-    })).map_err(|e| e.to_string())?;
-    
-    // Define the models we need to download
-    let models = vec![
-        ModelInfo {
-            id: "sd-v1-5".to_string(),
-            name: "Stable Diffusion v1.5".to_string(),
-            progress: 0.0,
-            status: ModelStatus::Queued.as_str().to_string(),
-            error_message: None,
-        },
-        ModelInfo {
-            id: "vae-model".to_string(),
-            name: "VAE Model".to_string(),
-            progress: 0.0,
-            status: ModelStatus::Queued.as_str().to_string(),
-            error_message: None,
-        },
-        ModelInfo {
-            id: "lora-base".to_string(),
-            name: "Character Base LoRA".to_string(),
-            progress: 0.0,
-            status: ModelStatus::Queued.as_str().to_string(),
-            error_message: None,
-        },
-    ];
-    
-    // Send initial model list
-    window.emit("model-download-status", json!({
-        "models": models
-    })).map_err(|e| e.to_string())?;
-    
-    // Simulate downloading each model
-    let mut current_models = models;
-    
-    // Download first model
-    current_models[0].status = ModelStatus::Downloading.as_str().to_string();
-    window.emit("model-download-status", json!({
-        "models": current_models
-    })).map_err(|e| e.to_string())?;
-    
-    for i in 1..=10 {
-        sleep(Duration::from_millis(500)).await;
-        current_models[0].progress = i as f32 * 10.0;
-        window.emit("model-download-status", json!({
-            "models": current_models
-        })).map_err(|e| e.to_string())?;
-        
-        window.emit("setup-progress", json!({
-            "phase": "downloading_models",
-            "currentStep": "Downloading Stable Diffusion v1.5",
-            "progress": i * 10,
-            "detailMessage": format!("Downloading Stable Diffusion v1.5... ({}%)", i * 10)
-        })).map_err(|e| e.to_string())?;
+    // 4. (Optional) ComfyUI Basic Health - can be added later if needed.
+    // ComfyUI sidecar start and health check will be handled by a subsequent command
+    // after SplashScreen receives BackendFullyVerifiedAndReady.
+    info!("[QUICK VERIFY] File-based verification checks passed. Sidecar start deferred.");
+    info!("[QUICK VERIFY] All quick file verification checks passed.");
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn get_setup_status_and_initialize(app_handle: AppHandle<Wry>) -> Result<(), String> {
+    info!("[SETUP LIFECYCLE] get_setup_status_and_initialize called.");
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let master_marker_path = app_data_dir.join("metamorphosis_setup_complete.marker");
+
+    if master_marker_path.exists() {
+        info!("[SETUP LIFECYCLE] Master Installation Marker found at {}. Performing quick verification.", master_marker_path.display());
+        match run_quick_verification(&app_handle).await {
+            Ok(true) => {
+                info!("[SETUP LIFECYCLE] Quick verification PASSED.");
+                app_handle.emit("setup_status", SetupStatusEvent::BackendFullyVerifiedAndReady).map_err(|e| e.to_string())?;
+                info!("[SETUP LIFECYCLE] Emitted BackendFullyVerifiedAndReady.");
+            }
+            Ok(false) => {
+                info!("[SETUP LIFECYCLE] Quick verification FAILED. Invalidating master marker.");
+                if let Err(e) = fs::remove_file(&master_marker_path) {
+                    error!("[SETUP LIFECYCLE] Failed to delete master marker file at {}: {}", master_marker_path.display(), e);
+                    // Not returning error here, will proceed to emit full_setup_required
+                } else {
+                    info!("[SETUP LIFECYCLE] Master marker file deleted: {}", master_marker_path.display());
+                }
+                app_handle.emit("setup_status", SetupStatusEvent::FullSetupRequired { reason: "Quick verification failed.".to_string() }).map_err(|e| e.to_string())?;
+                info!("[SETUP LIFECYCLE] Emitted FullSetupRequired (reason: verification failed).");
+            }
+            Err(e) => {
+                error!("[SETUP LIFECYCLE] Error during quick verification: {}. Assuming full setup required and invalidating marker.", e);
+                 if master_marker_path.exists() {
+                    if let Err(remove_err) = fs::remove_file(&master_marker_path) {
+                        error!("[SETUP LIFECYCLE] Failed to delete master marker file at {}: {}", master_marker_path.display(), remove_err);
+                    } else {
+                        info!("[SETUP LIFECYCLE] Master marker file deleted due to verification error: {}", master_marker_path.display());
+                    }
+                }
+                app_handle.emit("setup_status", SetupStatusEvent::FullSetupRequired { reason: format!("Error during verification: {}", e) }).map_err(|e| e.to_string())?;
+                info!("[SETUP LIFECYCLE] Emitted FullSetupRequired (reason: verification error).");
+            }
+        }
+    } else {
+        info!("[SETUP LIFECYCLE] Master Installation Marker NOT found at {}. Full setup required.", master_marker_path.display());
+        app_handle.emit("setup_status", SetupStatusEvent::FullSetupRequired { reason: "New installation or previous setup incomplete/corrupted.".to_string() }).map_err(|e| e.to_string())?;
+        info!("[SETUP LIFECYCLE] Emitted FullSetupRequired (reason: new installation).");
     }
-    
-    // Mark first model as complete and start second model
-    current_models[0].status = ModelStatus::Completed.as_str().to_string();
-    current_models[0].progress = 100.0;
-    current_models[1].status = ModelStatus::Downloading.as_str().to_string();
-    window.emit("model-download-status", json!({
-        "models": current_models
-    })).map_err(|e| e.to_string())?;
-    
-    for i in 1..=10 {
-        sleep(Duration::from_millis(300)).await;
-        current_models[1].progress = i as f32 * 10.0;
-        window.emit("model-download-status", json!({
-            "models": current_models
-        })).map_err(|e| e.to_string())?;
-        
-        window.emit("setup-progress", json!({
-            "phase": "downloading_models",
-            "currentStep": "Downloading VAE Model",
-            "progress": i * 10,
-            "detailMessage": format!("Downloading VAE Model... ({}%)", i * 10)
-        })).map_err(|e| e.to_string())?;
-    }
-    
-    // Mark second model as complete and start third model
-    current_models[1].status = ModelStatus::Completed.as_str().to_string();
-    current_models[1].progress = 100.0;
-    current_models[2].status = ModelStatus::Downloading.as_str().to_string();
-    window.emit("model-download-status", json!({
-        "models": current_models
-    })).map_err(|e| e.to_string())?;
-    
-    for i in 1..=10 {
-        sleep(Duration::from_millis(200)).await;
-        current_models[2].progress = i as f32 * 10.0;
-        window.emit("model-download-status", json!({
-            "models": current_models
-        })).map_err(|e| e.to_string())?;
-        
-        window.emit("setup-progress", json!({
-            "phase": "downloading_models",
-            "currentStep": "Downloading Character Base LoRA",
-            "progress": i * 10,
-            "detailMessage": format!("Downloading Character Base LoRA... ({}%)", i * 10)
-        })).map_err(|e| e.to_string())?;
-    }
-    
-    // Mark all models as complete
-    current_models[2].status = ModelStatus::Completed.as_str().to_string();
-    current_models[2].progress = 100.0;
-    window.emit("model-download-status", json!({
-        "models": current_models
-    })).map_err(|e| e.to_string())?;
-    
-    // 5. Finalizing Phase
-    window.emit("setup-progress", json!({
-        "phase": "finalizing",
-        "currentStep": "Finalizing installation",
-        "progress": 0,
-        "detailMessage": "Completing the setup process..."
-    })).map_err(|e| e.to_string())?;
-    
-    // Simulate finalization work
-    for i in 1..=10 {
-        sleep(Duration::from_millis(200)).await;
-        window.emit("setup-progress", json!({
-            "phase": "finalizing",
-            "currentStep": "Finalizing installation",
-            "progress": i * 10,
-            "detailMessage": format!("Configuring application settings... ({}%)", i * 10)
-        })).map_err(|e| e.to_string())?;
-    }
-    
-    // 6. Complete Phase
-    window.emit("setup-progress", json!({
-        "phase": "complete",
-        "currentStep": "Setup complete",
-        "progress": 100,
-        "detailMessage": "Metamorphosis is ready to use!"
-    })).map_err(|e| e.to_string())?;
-    
     Ok(())
 }

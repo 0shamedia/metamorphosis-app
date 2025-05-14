@@ -139,26 +139,47 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 
     // --- 6. Copy Vendor Directory to Build Output ---
+    eprintln!("cargo:warning=BUILD_RS_STAGE: Starting section 6: Copy Vendor Directory.");
     println!("Copying vendor directory to build output...");
     let build_profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string()); // Get build profile (debug/release)
+    eprintln!("cargo:warning=BUILD_RS_STAGE: Determined build profile: {}", build_profile);
     // --- Determine Paths ---
     // CARGO_MANIFEST_DIR points to the directory containing the Cargo.toml of the current package (src-tauri)
-    let cargo_manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")
-        .map_err(|e| format!("CARGO_MANIFEST_DIR not found: {}", e))?);
+    let cargo_manifest_dir = match env::var("CARGO_MANIFEST_DIR") {
+        Ok(p_str) => {
+            eprintln!("cargo:warning=BUILD_RS_STAGE: CARGO_MANIFEST_DIR found: {}", p_str);
+            PathBuf::from(p_str)
+        }
+        Err(e) => {
+            eprintln!("cargo:warning=BUILD_RS_ERROR: CARGO_MANIFEST_DIR not found: {}", e);
+            return Err(Box::new(e));
+        }
+    };
     
     // metamorphosis_app_dir is the root of the Tauri application (e.g., metamorphosis-app/)
     // It's the parent of src-tauri/
-    let metamorphosis_app_dir = cargo_manifest_dir.parent()
-        .ok_or_else(|| format!("Failed to get parent of CARGO_MANIFEST_DIR: {:?}", cargo_manifest_dir))?;
+    let metamorphosis_app_dir = match cargo_manifest_dir.parent() {
+        Some(p) => {
+            eprintln!("cargo:warning=BUILD_RS_STAGE: Parent of CARGO_MANIFEST_DIR (metamorphosis_app_dir) found: {:?}", p);
+            p.to_path_buf()
+        }
+        None => {
+            let err_msg = format!("Failed to get parent of CARGO_MANIFEST_DIR: {:?}", cargo_manifest_dir);
+            eprintln!("cargo:warning=BUILD_RS_ERROR: {}", err_msg);
+            return Err(err_msg.into());
+        }
+    };
 
     // Source path for the vendor directory (e.g., metamorphosis-app/vendor/)
     let absolute_vendor_path = metamorphosis_app_dir.join("vendor");
+    eprintln!("cargo:warning=BUILD_RS_STAGE: Calculated absolute_vendor_path (source): {:?}", absolute_vendor_path);
 
     // Destination path for the vendor directory within the final build target
     // e.g., metamorphosis-app/target/debug/vendor/ or metamorphosis-app/target/release/vendor/
     let project_target_root_dir = metamorphosis_app_dir.join("target");
     let dest_vendor_path_base = project_target_root_dir.join(&build_profile); // build_profile is "debug" or "release"
     let dest_vendor_path = dest_vendor_path_base.join("vendor");
+    eprintln!("cargo:warning=BUILD_RS_STAGE: Calculated dest_vendor_path (destination): {:?}", dest_vendor_path);
 
     println!("DEBUG: Source vendor path (build.rs): {:?}", &absolute_vendor_path);
     println!("DEBUG: Destination vendor path calculated by build.rs: {:?}", &dest_vendor_path);
@@ -166,44 +187,74 @@ fn main() -> Result<(), Box<dyn Error>> {
     // The copy_recursively function will create the destination directory if it doesn't exist.
     // We ensure its parent exists here for clarity and to catch potential issues earlier.
     if let Some(parent_dir) = dest_vendor_path.parent() {
-        fs::create_dir_all(parent_dir)
-            .map_err(|e| format!("Failed to create parent directory for dest_vendor_path {:?}: {}", parent_dir, e))?;
+        eprintln!("cargo:warning=BUILD_RS_STAGE: Ensuring parent of dest_vendor_path exists: {:?}", parent_dir);
+        if let Err(e) = fs::create_dir_all(parent_dir) {
+            let err_msg = format!("Failed to create parent directory for dest_vendor_path {:?}: {}", parent_dir, e);
+            eprintln!("cargo:warning=BUILD_RS_ERROR: {}", err_msg);
+            return Err(err_msg.into());
+        }
+        eprintln!("cargo:warning=BUILD_RS_STAGE: Parent directory ensured/created.");
+    } else {
+        eprintln!("cargo:warning=BUILD_RS_WARN: Could not get parent of dest_vendor_path: {:?}", dest_vendor_path);
+        // Potentially return an error here if this is critical
     }
     
     // Attempt to remove the destination directory before copying to avoid permission/lock issues
     println!("Attempting to clean destination vendor directory: {:?}", &dest_vendor_path);
+    eprintln!("cargo:warning=BUILD_RS_STAGE: Attempting to clean destination vendor directory: {:?}", &dest_vendor_path);
     if dest_vendor_path.exists() {
         match fs::remove_dir_all(&dest_vendor_path) {
-            Ok(_) => println!("Successfully cleaned destination vendor directory."),
-            Err(e) => eprintln!("Warning: Failed to clean destination vendor directory: {}. Proceeding with copy, but this might cause issues.", e),
+            Ok(_) => {
+                println!("Successfully cleaned destination vendor directory.");
+                eprintln!("cargo:warning=BUILD_RS_INFO: Successfully cleaned destination vendor directory.");
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to clean destination vendor directory: {}. Proceeding with copy, but this might cause issues.", e);
+                eprintln!("cargo:warning=BUILD_RS_WARN: Failed to clean destination vendor directory: {}. Proceeding with copy.", e);
+            }
         }
+    } else {
+        eprintln!("cargo:warning=BUILD_RS_INFO: Destination vendor directory does not exist, no need to clean.");
     }
 
 
     println!("Source vendor path (absolute): {:?}", &absolute_vendor_path);
+    eprintln!("cargo:warning=BUILD_RS_DEBUG: Source vendor path (absolute): {:?}", &absolute_vendor_path);
     println!("Destination vendor path (absolute): {:?}", &dest_vendor_path);
+    eprintln!("cargo:warning=BUILD_RS_DEBUG: Destination vendor path (absolute): {:?}", &dest_vendor_path);
 
     // Use Rust-native recursive directory copying
     println!("Using Rust-native recursive directory copying...");
-    copy_recursively(&absolute_vendor_path, &dest_vendor_path)?;
+    eprintln!("cargo:warning=BUILD_RS_INFO: Attempting vendor directory copy from {:?} to {:?}", &absolute_vendor_path, &dest_vendor_path);
+    match copy_recursively(&absolute_vendor_path, &dest_vendor_path) {
+        Ok(_) => eprintln!("cargo:warning=BUILD_RS_INFO: Vendor directory copy reported successful by copy_recursively."),
+        Err(e) => {
+            eprintln!("cargo:warning=BUILD_RS_ERROR: Vendor directory copy FAILED with error: {}", e);
+            // Decide if we should return Err(e.into()) here or let it proceed to verification.
+            // For now, let it proceed to see if verification also fails.
+        }
+    }
+    eprintln!("cargo:warning=BUILD_RS_INFO: Vendor directory copy attempt finished (check success/failure above).");
     
-
-
-    println!("BUILD_RS_TEST: Reached verification section.");
+    eprintln!("cargo:warning=BUILD_RS_TEST: Reached verification section after copy attempt.");
 
     // --- Verify requirements.txt exists after copy ---
     let requirements_dest_path = dest_vendor_path.join("comfyui/requirements.txt");
+    eprintln!("cargo:warning=BUILD_RS_VERIFY_CHECK: Checking for requirements.txt at: {:?}", requirements_dest_path);
     if requirements_dest_path.exists() {
-        println!("BUILD_RS_VERIFY: requirements.txt found at {:?}", requirements_dest_path);
+        eprintln!("cargo:warning=BUILD_RS_VERIFY_RESULT: requirements.txt FOUND at {:?}", requirements_dest_path);
     } else {
-        println!("BUILD_RS_VERIFY: requirements.txt NOT found at {:?}", requirements_dest_path);
+        eprintln!("cargo:warning=BUILD_RS_VERIFY_RESULT: requirements.txt NOT FOUND at {:?}. Source was: {:?}", requirements_dest_path, absolute_vendor_path.join("comfyui/requirements.txt"));
     }
     // --- End verification ---
 
     // --- Tauri Build ---
     println!("Running Tauri build...");
+    eprintln!("cargo:warning=BUILD_RS_STAGE: Starting tauri_build::build().");
     tauri_build::build();
+    eprintln!("cargo:warning=BUILD_RS_STAGE: tauri_build::build() finished.");
 
+    eprintln!("cargo:warning=BUILD_RS_STAGE: main function in build.rs is about to return Ok(()).");
     Ok(())
 }
 
