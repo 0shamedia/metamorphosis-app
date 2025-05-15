@@ -105,6 +105,11 @@ export default function SplashScreenComponent({ onComplete }: SplashScreenProps)
   const [isStartingServices, setIsStartingServices] = useState(false); // New state
   const ensurePromiseResolvedRef = useRef(false); // Ref for the new timeout logic
 
+const isStartingServicesRef = useRef(isStartingServices);
+
+  useEffect(() => {
+    isStartingServicesRef.current = isStartingServices;
+  }, [isStartingServices]);
   // Backend communication logic
   useEffect(() => {
     console.log('[SplashScreen] Component mounted at:', new Date().toISOString());
@@ -279,7 +284,7 @@ export default function SplashScreenComponent({ onComplete }: SplashScreenProps)
             const payload = event.payload as { status: string; message: string; isError: boolean };
             console.log(`[SplashScreen] Received backend-status:`, payload);
 
-            if (isStartingServices) { // Only process if we are in the service starting phase
+            if (isStartingServicesRef.current) { // Use ref here
                 if (payload.status === 'backend_ready' && !payload.isError) {
                     console.log('[SplashScreen] Backend services reported ready.');
                     setLoadingText('Backend services started. Launching application...');

@@ -5,10 +5,12 @@ use tauri::{Manager, Url}; // Import Url
 use std::thread;
 use std::time::Duration;
 
-mod comfyui_sidecar; // Declare the modules
+mod comfyui_sidecar;       // This file re-exports from sidecar_manager
 mod gpu_detection;
 mod dependency_management;
-mod setup; // Add our new setup module
+mod setup;                 // This file re-exports from setup_manager
+pub mod sidecar_manager;   // Declare the new top-level module
+pub mod setup_manager;     // Declare the new top-level module
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -120,13 +122,13 @@ pub fn run() {
     .plugin(tauri_plugin_http::init()) // Register the HTTP plugin
     .invoke_handler(tauri::generate_handler![
       // Register our setup commands
-      setup::check_initialization_status,
-      setup::start_application_setup, // This might become obsolete or change purpose
-      setup::retry_application_setup, // This might become obsolete or change purpose
-      setup::get_setup_status_and_initialize, // New command for setup lifecycle
+      setup_manager::verification::check_initialization_status,
+      setup_manager::orchestration::start_application_setup,
+      setup_manager::orchestration::retry_application_setup,
+      setup_manager::orchestration::get_setup_status_and_initialize,
       // Register the new backend readiness command
-      comfyui_sidecar::ensure_backend_ready,
-      comfyui_sidecar::ensure_comfyui_running_and_healthy // New command for SplashScreen
+      sidecar_manager::orchestration::ensure_backend_ready,
+      sidecar_manager::orchestration::ensure_comfyui_running_and_healthy
     ])
     .on_window_event(|window, event| match event {
         tauri::WindowEvent::Destroyed => {
