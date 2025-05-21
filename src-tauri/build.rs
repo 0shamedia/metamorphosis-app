@@ -5,14 +5,10 @@ use std::{
     io::{self, Cursor},
     path::{Path, PathBuf},
 };
-use std::io::Write; // Import the Write trait for write_all
-
-
-use std::panic;
-
 use flate2::read::GzDecoder;
 use tar::Archive;
 use zip::ZipArchive;
+use fs_extra::dir::{copy, CopyOptions}; // Import fs_extra copy function and options
 
 const PYTHON_VERSION: &str = "3.12.10"; // Upgrade to Python 3.12.10
 const PYTHON_RELEASE_TAG: &str = "20250409"; // Use latest valid release tag
@@ -20,27 +16,8 @@ const BASE_URL: &str = "https://github.com/astral-sh/python-build-standalone/rel
 const VENDOR_DIR: &str = "../vendor"; // Relative to src-tauri
 const PYTHON_INSTALL_DIR_NAME: &str = "python"; // Directory inside vendor where python will be extracted
 
-fn copy_recursively(source: &Path, destination: &Path) -> Result<(), Box<dyn Error>> {
-    // Create the destination directory if it doesn't exist
-    fs::create_dir_all(destination)?;
-
-    // Iterate over entries in the source directory
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let entry_path = entry.path();
-        let entry_filename = entry_path.file_name().ok_or("Invalid file name")?;
-        let dest_path = destination.join(entry_filename);
-
-        if entry_path.is_dir() {
-            // If it's a directory, recursively call copy_recursively
-            copy_recursively(&entry_path, &dest_path)?;
-        } else {
-            // If it's a file, copy it
-            fs::copy(&entry_path, &dest_path)?;
-        }
-    }
-    Ok(())
-}
+// Remove the custom copy_recursively function
+// fn copy_recursively(...) { ... }
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=build.rs");
@@ -223,11 +200,50 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Destination vendor path (absolute): {:?}", &dest_vendor_path);
     eprintln!("cargo:warning=BUILD_RS_DEBUG: Destination vendor path (absolute): {:?}", &dest_vendor_path);
 
-    // Use Rust-native recursive directory copying
-    println!("Using Rust-native recursive directory copying...");
+    // --- Diagnostic: List Source Vendor Contents ---
+    std::thread::sleep(std::time::Duration::from_secs(1)); // Add delay after manual cleanup
+    eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Listing contents of source vendor directory: {:?}", &absolute_vendor_path);
+    match fs::read_dir(&absolute_vendor_path) {
+        Ok(entries) => {
+            eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Found entries in source vendor directory:");
+            for entry_result in entries {
+                match entry_result {
+                    Ok(entry) => eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC:   - {:?}", entry.path()),
+                    Err(e) => eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC:   - Error reading entry: {}", e),
+                }
+            }
+        }
+        Err(e) => eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Error reading source vendor directory: {}", e),
+    }
+
+    // --- Diagnostic: List Source Vendor/ComfyUI Contents ---
+    std::thread::sleep(std::time::Duration::from_secs(1)); // Add delay after listing vendor
+    let source_comfyui_path = absolute_vendor_path.join("comfyui");
+    eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Listing contents of source vendor/comfyui directory: {:?}", &source_comfyui_path);
+    match fs::read_dir(&source_comfyui_path) {
+        Ok(entries) => {
+            eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Found entries in source vendor/comfyui directory:");
+            for entry_result in entries {
+                match entry_result {
+                    Ok(entry) => eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC:   - {:?}", entry.path()),
+                    Err(e) => eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC:   - Error reading entry: {}", e),
+                }
+            }
+        }
+        Err(e) => eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Error reading source vendor/comfyui directory: {}", e),
+    }
+
+
+    // Use fs_extra::dir::copy for recursive directory copying
+    println!("Using fs_extra::dir::copy for recursive directory copying...");
+    std::thread::sleep(std::time::Duration::from_secs(1)); // Add delay before copy
     eprintln!("cargo:warning=BUILD_RS_INFO: Attempting vendor directory copy from {:?} to {:?}", &absolute_vendor_path, &dest_vendor_path);
-    match copy_recursively(&absolute_vendor_path, &dest_vendor_path) {
-        Ok(_) => eprintln!("cargo:warning=BUILD_RS_INFO: Vendor directory copy reported successful by copy_recursively."),
+    let mut options = CopyOptions::new();
+    options.overwrite = true; // Overwrite existing files
+    options.copy_inside = true; // Copy the contents of the source directory, not the directory itself
+
+    match copy(&absolute_vendor_path, &dest_vendor_path, &options) {
+        Ok(_) => eprintln!("cargo:warning=BUILD_RS_INFO: Vendor directory copy reported successful by fs_extra::dir::copy."),
         Err(e) => {
             eprintln!("cargo:warning=BUILD_RS_ERROR: Vendor directory copy FAILED with error: {}", e);
             // Decide if we should return Err(e.into()) here or let it proceed to verification.
@@ -424,19 +440,4 @@ fn extract_archive(
 
 
     Ok(())
-}
-
-
-fn get_python_paths(python_root: &Path, target: &str) -> Result<(PathBuf, PathBuf), Box<dyn Error>> {
-    let (pip_rel_path, site_packages_rel_path) = if target.contains("windows") {
-        ("Scripts/pip.exe".to_string(), "Lib/site-packages".to_string())
-    } else {
-        // Assume Unix-like structure
-        ("bin/pip".to_string(), format!("lib/python{}/site-packages", PYTHON_VERSION.split('.').take(2).collect::<Vec<&str>>().join("."))) // Use major.minor from PYTHON_VERSION
-    };
-
-    let pip_path = python_root.join(pip_rel_path);
-    let site_packages_path = python_root.join(site_packages_rel_path);
-
-    Ok((pip_path, site_packages_path))
 }

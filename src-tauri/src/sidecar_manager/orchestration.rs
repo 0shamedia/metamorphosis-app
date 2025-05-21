@@ -1,10 +1,10 @@
 // metamorphosis-app/src-tauri/src/sidecar_manager/orchestration.rs
 
-use tauri::{AppHandle, Manager, Wry, Emitter};
+use tauri::{AppHandle, Wry, Emitter};
 use log::{info, error};
 use tokio::time::Duration; // For port check delay
 use tauri_plugin_http::reqwest; // For port check client
-use std::path::PathBuf; // For path construction during spawn_and_health_check_comfyui
+// use std::path::PathBuf; // For path construction during spawn_and_health_check_comfyui - PathBuf is used by internal_spawn_comfyui_process
 
 // Internal imports from sibling modules
 use super::event_utils::{emit_backend_status, COMFYUI_PORT};
@@ -14,7 +14,6 @@ use super::health_checker::{perform_comfyui_health_check, monitor_comfyui_health
 // Crate-level imports
 use crate::dependency_management::{self}; // For install_python_dependencies_with_progress
 use crate::setup; // For emit_setup_progress
-use crate::gpu_detection::{get_gpu_info, GpuType}; // For spawn_and_health_check_comfyui
 
 // Tauri command to ensure dependencies are installed and sidecar is started
 #[tauri::command]

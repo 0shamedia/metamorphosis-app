@@ -9,10 +9,12 @@
 // `comfyui_sidecar::function_name` or `comfyui_sidecar::CONSTANT_NAME`.
 
 // Tauri commands are re-exported directly.
-pub use crate::sidecar_manager::orchestration::{
-    ensure_backend_ready,
-    ensure_comfyui_running_and_healthy,
-};
+// ensure_backend_ready and ensure_comfyui_running_and_healthy were reported as unused re-exports here.
+// They are likely called directly from crate::sidecar_manager::orchestration or defined as tauri commands.
+// pub use crate::sidecar_manager::orchestration::{
+//     ensure_backend_ready, // Marked as unused re-export
+//     ensure_comfyui_running_and_healthy, // Marked as unused re-export
+// };
 
 // Public functions are re-exported.
 pub use crate::sidecar_manager::orchestration::{
@@ -25,7 +27,7 @@ pub use crate::sidecar_manager::process_handler::{
 
 // Public constants (if any were directly used externally from here).
 // COMFYUI_PORT is re-exported from sidecar_manager::event_utils via sidecar_manager::mod.rs
-pub use crate::sidecar_manager::COMFYUI_PORT;
+// pub use crate::sidecar_manager::COMFYUI_PORT; // Marked as unused by compiler
 
 // Note: Most `use` statements that were previously at the top of this file
 // have been moved into the respective sub-modules within `sidecar_manager`

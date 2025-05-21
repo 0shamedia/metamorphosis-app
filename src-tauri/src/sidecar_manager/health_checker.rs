@@ -1,6 +1,6 @@
 // metamorphosis-app/src-tauri/src/sidecar_manager/health_checker.rs
 
-use tauri::{AppHandle, Manager, Wry, async_runtime, Emitter};
+use tauri::{AppHandle, Wry, async_runtime, Emitter};
 use tauri_plugin_http::reqwest;
 use tokio::time::{interval, Duration};
 use log::{info, error};

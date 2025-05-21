@@ -1,8 +1,5 @@
 use std::env;
-use std::path::PathBuf; // Import PathBuf
-use tauri::Listener;
 use tauri::{Manager, Url}; // Import Url
-use std::thread;
 use std::time::Duration;
 
 mod comfyui_sidecar;       // This file re-exports from sidecar_manager
@@ -28,7 +25,6 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init()) // Initialize the Opener plugin
     .setup(move |app| {
       // Logging should be configured via the plugin initialization above
-      let setup_start = std::time::Instant::now();
       log::info!("[STARTUP] App setup started - elapsed: {:?}", app_start_time.elapsed());
       
       let app_handle_clone = app.handle().clone(); // Clone app_handle for async task

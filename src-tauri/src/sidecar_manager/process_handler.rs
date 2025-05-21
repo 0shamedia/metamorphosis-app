@@ -5,14 +5,11 @@ use std::sync::Mutex;
 use std::time::Instant;
 use std::pin::Pin;
 use std::future::Future;
-use std::error::Error as StdError; // Alias to avoid conflict with local Error
-
-use tauri::{AppHandle, Manager, Wry, async_runtime};
+use tauri::{AppHandle, Wry, async_runtime};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use once_cell::sync::Lazy;
 use log::{info, error};
-use scopeguard;
 
 // Internal imports from sibling modules
 use super::event_utils::{emit_backend_status, COMFYUI_PORT};
@@ -42,8 +39,8 @@ pub(super) fn spawn_comfyui_process(app_handle: AppHandle<Wry>) -> Pin<Box<dyn F
         return Box::pin(async { Ok(()) }); // Or perhaps an error indicating it's already running if that's unexpected by caller
     }
 
-    let app_handle_clone = app_handle.clone();
-    Box::pin(async move {
+    // let app_handle_clone = app_handle.clone(); // This was unused as app_handle is moved into the async block
+    Box::pin(async move { // app_handle is moved here
         // The scopeguard for IS_ATTEMPTING_SPAWN is removed from here as it's managed by the caller.
 
         info!("Attempting to spawn ComfyUI process on port {}...", COMFYUI_PORT);
@@ -163,9 +160,9 @@ pub(super) fn spawn_comfyui_process(app_handle: AppHandle<Wry>) -> Pin<Box<dyn F
                 }
             };
 
-        let app_handle_clone_for_logs = app_handle.clone(); 
         async_runtime::spawn(async move {
-            let app_handle_for_event_emission = app_handle_clone_for_logs; // Renaming for clarity
+            // let app_handle_clone_for_logs = app_handle.clone(); // This clone is not used if emit_backend_status on termination is commented out
+            // let app_handle_for_event_emission = app_handle_clone_for_logs; // Renaming for clarity - currently unused
             while let Some(event) = rx.recv().await {
                 match event {
                     CommandEvent::Stdout(line) => {

@@ -1,11 +1,23 @@
 // metamorphosis-app/src-tauri/src/setup_manager/verification.rs
-use tauri::{Window, WebviewWindow, AppHandle, Manager, Wry, Emitter};
+use tauri::{WebviewWindow, AppHandle, Manager, Wry, Emitter};
 use serde_json::json;
-use log::{error, info};
-use std::path::PathBuf;
+use log::{error, info, warn};
+use std::path::Path; // PathBuf is no longer directly used here
+// use tauri::path::BaseDirectory;
 use std::fs;
+use std::process::{Command, Stdio};
+use std::io::{BufReader, BufRead};
+// use std::env; // No longer needed
 
-use super::types::SetupStatusEvent; // Import from the new types module
+// Import new python_utils functions
+use crate::setup_manager::python_utils::{
+    get_comfyui_directory_path,
+    get_bundled_python_executable_path,
+    get_venv_python_executable_path,
+    get_script_path as get_util_script_path, // Alias to avoid conflict if a local one exists temporarily
+};
+
+// use super::types::SetupStatusEvent;
 
 // Note: comfyui_sidecar and dependency_management are kept as crate level for now.
 // If they are also refactored into managers, these paths would change.
@@ -103,24 +115,7 @@ pub async fn check_initialization_status(window: WebviewWindow) -> Result<(), St
 
     // Check 2: Check Python Executable Path
     info!("[SETUP_VERIFICATION] Check 2: Checking Python Executable Path...");
-    let python_executable_path_result: Result<PathBuf, String> = {
-        let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get current exe path: {}", e))?;
-        let exe_dir = exe_path.parent().ok_or_else(|| "Failed to get executable directory".to_string())?;
-        if cfg!(debug_assertions) {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .ok_or_else(|| "Failed to get parent of CARGO_MANIFEST_DIR for python executable".to_string())?
-                .join("target")
-                .join("debug")
-                .join("vendor")
-                .join("python")
-                .join("python.exe")
-        } else {
-            exe_dir.join("vendor").join("python").join("python.exe")
-        }
-        .canonicalize() // Resolve to absolute path to be sure
-        .map_err(|e| format!("Failed to canonicalize python path: {}", e))
-    };
+    let python_executable_path_result = get_bundled_python_executable_path(&app_handle);
 
     match python_executable_path_result {
         Ok(python_path) => {
@@ -147,23 +142,7 @@ pub async fn check_initialization_status(window: WebviewWindow) -> Result<(), St
 
     // Check 3: Check ComfyUI Directory Path
     info!("[SETUP_VERIFICATION] Check 3: Checking ComfyUI Directory Path...");
-    let comfyui_directory_path_result: Result<PathBuf, String> = {
-        let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get current exe path: {}", e))?;
-        let exe_dir = exe_path.parent().ok_or_else(|| "Failed to get executable directory".to_string())?;
-        if cfg!(debug_assertions) {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .ok_or_else(|| "Failed to get parent of CARGO_MANIFEST_DIR for comfyui_dir".to_string())?
-                .join("target")
-                .join("debug")
-                .join("vendor")
-                .join("comfyui")
-        } else {
-            exe_dir.join("vendor").join("comfyui")
-        }
-        .canonicalize() // Resolve to absolute path
-        .map_err(|e| format!("Failed to canonicalize comfyui path: {}", e))
-    };
+    let comfyui_directory_path_result = get_comfyui_directory_path(&app_handle);
 
     match comfyui_directory_path_result {
         Ok(comfyui_path) => {
@@ -210,37 +189,18 @@ pub async fn check_initialization_status(window: WebviewWindow) -> Result<(), St
     Ok(())
 }
 
-
-fn get_comfyui_vendor_paths(app_handle: &AppHandle<Wry>) -> Result<(PathBuf, PathBuf, PathBuf), String> {
-    let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get current exe path: {}", e))?;
-    let exe_dir = exe_path.parent().ok_or_else(|| "Failed to get executable directory".to_string())?;
-
-    let base_path = if cfg!(debug_assertions) {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .ok_or_else(|| "Failed to get parent of CARGO_MANIFEST_DIR".to_string())?
-            .join("target")
-            .join("debug")
-            .join("vendor")
-    } else {
-        exe_dir.join("vendor")
-    };
-
-    let comfyui_dir = base_path.join("comfyui");
-    let venv_dir = comfyui_dir.join(".venv");
-    let venv_python_executable = if cfg!(target_os = "windows") {
-        venv_dir.join("Scripts").join("python.exe")
-    } else {
-        venv_dir.join("bin").join("python")
-    };
-    Ok((comfyui_dir, venv_dir, venv_python_executable))
-}
-
+// Removed local get_comfyui_vendor_paths, will use python_utils directly.
 
 pub async fn run_quick_verification(app_handle: &AppHandle<Wry>) -> Result<bool, String> {
     info!("[QUICK VERIFY] Starting quick verification process...");
 
-    let (comfyui_dir, venv_dir, venv_python_executable) = get_comfyui_vendor_paths(app_handle)?;
+    let comfyui_dir = get_comfyui_directory_path(app_handle)?;
+    let venv_python_executable = get_venv_python_executable_path(app_handle)?;
+    // venv_dir can be derived if needed: venv_python_executable.parent().unwrap().parent().unwrap()
+    // For the check, we primarily need comfyui_dir and venv_python_executable.
+    // Let's get venv_dir explicitly for the check.
+    let venv_dir = comfyui_dir.join(".venv");
+
 
     // 1. Venv Integrity: Check .venv directory
     if !venv_dir.exists() || !venv_dir.is_dir() {
@@ -270,4 +230,142 @@ pub async fn run_quick_verification(app_handle: &AppHandle<Wry>) -> Result<bool,
     info!("[QUICK VERIFY] File-based verification checks passed. Sidecar start deferred.");
     info!("[QUICK VERIFY] All quick file verification checks passed.");
     Ok(true)
+}
+
+// Verification step names (for event payloads and logging)
+const VERIFICATION_EVENT_IPADAPTER_DIR: &str = "Verifying IPAdapter Plus directory";
+// const VERIFICATION_EVENT_ONNXRUNTIME_IMPORT: &str = "Verifying onnxruntime import"; // Unused
+// const VERIFICATION_EVENT_INSIGHTFACE_IMPORT: &str = "Verifying insightface import"; // Unused
+
+// Tauri Event names (constants for consistency)
+const EVT_VERIFICATION_STEP_START: &str = "VerificationStepStart";
+const EVT_VERIFICATION_STEP_SUCCESS: &str = "VerificationStepSuccess";
+const EVT_VERIFICATION_STEP_FAILED: &str = "VerificationStepFailed";
+
+/// Checks if the ComfyUI_IPAdapter_plus custom node directory exists.
+pub async fn check_ipadapter_plus_directory_exists(
+    app_handle: &AppHandle<Wry>,
+    comfyui_base_path: &Path,
+) -> Result<bool, String> {
+    let step_name = VERIFICATION_EVENT_IPADAPTER_DIR;
+    info!("[VERIFY] Starting: {}", step_name);
+    app_handle.emit(EVT_VERIFICATION_STEP_START, json!({ "stepName": step_name })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_START, e))?;
+
+    let ipadapter_dir = comfyui_base_path.join("custom_nodes").join("ComfyUI_IPAdapter_plus");
+    info!("[VERIFY] Checking for directory: {}", ipadapter_dir.display());
+
+    if ipadapter_dir.exists() && ipadapter_dir.is_dir() {
+        info!("[VERIFY] SUCCESS: {} found at {}", step_name, ipadapter_dir.display());
+        app_handle.emit(EVT_VERIFICATION_STEP_SUCCESS, json!({ "stepName": step_name, "details": format!("Directory found at {}", ipadapter_dir.display()) })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_SUCCESS, e))?;
+        Ok(true)
+    } else {
+        let err_msg = format!("Directory not found or is not a directory: {}", ipadapter_dir.display());
+        warn!("[VERIFY] FAILED: {} - {}", step_name, err_msg);
+        app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name, "error": err_msg.clone(), "details": null })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_FAILED, e))?;
+        Ok(false) // Indicates check performed, but condition not met
+    }
+}
+
+// Local get_script_path removed, will use get_util_script_path from python_utils.
+
+/// Checks if a Python package can be imported by running a specific script in the ComfyUI venv.
+pub async fn check_python_package_import(
+    app_handle: &AppHandle<Wry>,
+    package_name_for_log: &str, // e.g., "onnxruntime"
+    script_name: &str,          // e.g., "script_check_onnx.py"
+    venv_python_executable: &Path,
+    comfyui_base_path: &Path, // For working directory
+) -> Result<(), String> {
+    let step_name = format!("Verifying {} import", package_name_for_log);
+    info!("[VERIFY] Starting: {}", step_name);
+    app_handle.emit(EVT_VERIFICATION_STEP_START, json!({ "stepName": step_name.clone() })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_START, e))?;
+
+    let script_path = get_util_script_path(app_handle, script_name)?; // Use aliased util function
+    info!("[VERIFY] Using script: {} for {}", script_path.display(), package_name_for_log);
+    info!("[VERIFY] Using Python executable: {}", venv_python_executable.display());
+    info!("[VERIFY] Using ComfyUI base path as CWD: {}", comfyui_base_path.display());
+
+    if !venv_python_executable.exists() {
+        let err_msg = format!("Python executable for venv not found at {}", venv_python_executable.display());
+        error!("[VERIFY] FAILED (pre-check): {} - {}", step_name, err_msg);
+        app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name.clone(), "error": err_msg.clone(), "details": null })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_FAILED, e))?;
+        return Err(err_msg);
+    }
+    if !script_path.exists() {
+        let err_msg = format!("Verification script not found at {}", script_path.display());
+        error!("[VERIFY] FAILED (pre-check): {} - {}", step_name, err_msg);
+        app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name.clone(), "error": err_msg.clone(), "details": null })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_FAILED, e))?;
+        return Err(err_msg);
+    }
+
+    let mut command = Command::new(venv_python_executable);
+    command.arg(&script_path);
+    command.current_dir(comfyui_base_path);
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+
+    info!("[VERIFY] Executing command: {:?} with CWD: {}", command, comfyui_base_path.display());
+
+    let mut child = command.spawn().map_err(|e| {
+        let err_msg = format!("Failed to spawn verification script for {}: {}", package_name_for_log, e);
+        error!("[VERIFY] {}", err_msg);
+        // Emit event for spawn failure
+        app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name.clone(), "error": err_msg.clone(), "details": null })).unwrap_or_else(|emit_err| error!("Failed to emit {} event after spawn error: {}", EVT_VERIFICATION_STEP_FAILED, emit_err));
+        err_msg
+    })?;
+
+    let mut stdout_lines = Vec::new();
+    if let Some(stdout) = child.stdout.take() {
+        let reader = BufReader::new(stdout);
+        for line_result in reader.lines() {
+            match line_result {
+                Ok(line) => {
+                    info!("[VERIFY][{}_stdout] {}", package_name_for_log, line);
+                    stdout_lines.push(line);
+                }
+                Err(e) => warn!("[VERIFY][{}_stdout] Error reading line: {}", package_name_for_log, e),
+            }
+        }
+    }
+
+    let mut stderr_lines = Vec::new();
+    if let Some(stderr) = child.stderr.take() {
+        let reader = BufReader::new(stderr);
+        for line_result in reader.lines() {
+            match line_result {
+                Ok(line) => {
+                    error!("[VERIFY][{}_stderr] {}", package_name_for_log, line); // Log stderr as error
+                    stderr_lines.push(line);
+                }
+                Err(e) => warn!("[VERIFY][{}_stderr] Error reading line: {}", package_name_for_log, e),
+            }
+        }
+    }
+    
+    let status = child.wait().map_err(|e| {
+        let err_msg = format!("Failed to wait for verification script for {}: {}", package_name_for_log, e);
+        error!("[VERIFY] {}", err_msg);
+         app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name.clone(), "error": err_msg.clone(), "details": null })).unwrap_or_else(|emit_err| error!("Failed to emit {} event after wait error: {}", EVT_VERIFICATION_STEP_FAILED, emit_err));
+        err_msg
+    })?;
+
+    let stdout_str = stdout_lines.join("\n");
+    let stderr_str = stderr_lines.join("\n");
+
+    if status.success() {
+        info!("[VERIFY] SUCCESS: {} imported successfully. Output: {}", package_name_for_log, stdout_str);
+        app_handle.emit(EVT_VERIFICATION_STEP_SUCCESS, json!({ "stepName": step_name.clone(), "details": stdout_str })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_SUCCESS, e))?;
+        Ok(())
+    } else {
+        let err_msg = format!(
+            "Failed to import {}. Exit code: {}. Stdout: [{}]. Stderr: [{}]",
+            package_name_for_log,
+            status.code().map_or_else(|| "N/A".to_string(), |c| c.to_string()),
+            stdout_str,
+            stderr_str
+        );
+        error!("[VERIFY] FAILED: {} - {}", step_name, err_msg);
+        app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name.clone(), "error": err_msg.clone(), "details": stderr_str })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_FAILED, e))?;
+        Err(err_msg)
+    }
 }

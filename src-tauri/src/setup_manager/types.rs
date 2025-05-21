@@ -20,6 +20,7 @@ pub enum SetupPhase {
     Checking,
     InstallingComfyui,
     PythonSetup,
+    InstallingCustomNodes, // Added for custom node installation
     DownloadingModels,
     Finalizing,
     Complete,
@@ -53,4 +54,18 @@ pub struct ModelInfo {
 pub enum SetupStatusEvent {
     BackendFullyVerifiedAndReady,
     FullSetupRequired { reason: String },
+}
+
+// Payloads for Custom Node Cloning Events
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomNodePayload {
+    pub node_name: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomNodeCloneFailedPayload {
+    pub node_name: String,
+    pub error: String,
 }

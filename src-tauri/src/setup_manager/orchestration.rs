@@ -1,13 +1,26 @@
 // metamorphosis-app/src-tauri/src/setup_manager/orchestration.rs
 use tauri::{AppHandle, Manager, Wry, Emitter}; // Emitter might not be directly used here but good to have if needed
-use log::{error, info};
+use log::{error, info, warn};
 use std::fs;
-use std::time::Duration;
-use tokio::time::sleep;
 
 use super::event_utils::emit_setup_progress;
 use super::types::SetupStatusEvent;
-use super::verification::{check_initialization_status, run_quick_verification};
+// Updated verification imports
+use super::verification::{
+    check_initialization_status, run_quick_verification,
+    check_ipadapter_plus_directory_exists, check_python_package_import,
+    // get_comfyui_vendor_paths, // This will be replaced by python_utils
+};
+// Import new python_utils functions
+use crate::setup_manager::python_utils::{
+    get_comfyui_directory_path,
+    // get_bundled_python_executable_path, // Not directly used here, but available
+    get_venv_python_executable_path,
+    // get_script_path, // Not directly used here
+    // get_vendor_path, // No longer directly used here, comfyui_directory_path is used
+};
+use crate::setup_manager::{get_core_models_list, download_and_place_models};
+use super::custom_node_management;
 
 // Note: comfyui_sidecar and dependency_management are kept as crate level for now.
 // If they are also refactored into managers, these paths would change.
@@ -136,33 +149,143 @@ async fn orchestrate_full_setup(app_handle: AppHandle<Wry>) -> Result<(), String
         }
     }
 
-    // Phase 4: Downloading Models (Simulated for now, to be replaced with actual logic)
-    emit_setup_progress(&app_handle, "downloading_models", "Preparing to download AI models...", 0, None, None);
-    let models_to_download = vec!["Stable Diffusion v1.5", "VAE Model", "Character Base LoRA"];
-    let num_models = models_to_download.len();
-    if num_models > 0 { 
-        for (idx, model_name) in models_to_download.iter().enumerate() {
-            let phase_start_progress = ((idx * 100) / num_models) as u8;
-            emit_setup_progress(&app_handle, "downloading_models", &format!("Starting download: {}", model_name), phase_start_progress, None, None);
-            for progress_step in 1..=10 {
-                sleep(Duration::from_millis(150)).await; 
-                let model_progress_percent = progress_step * 10;
-                let overall_phase_progress = (((idx * 100) + model_progress_percent) / num_models) as u8;
-                emit_setup_progress(
-                    &app_handle,
-                    "downloading_models",
-                    &format!("Downloading {} ({}%)", model_name, model_progress_percent),
-                    overall_phase_progress.min(100), 
-                    Some(format!("Downloading {} - {}MB / {}MB", model_name, model_progress_percent * 5, 500)), 
-                    None,
-                );
-            }
-            let phase_end_progress = (((idx + 1) * 100) / num_models) as u8;
-            emit_setup_progress(&app_handle, "downloading_models", &format!("Finished download: {}", model_name), phase_end_progress.min(100), None, None);
+    // Phase: Installing Custom Nodes
+    // This phase is added before model downloading, as custom nodes might define model locations or types.
+    emit_setup_progress(&app_handle, "installing_custom_nodes", "Initializing custom node installation...", 0, None, None);
+    match custom_node_management::clone_comfyui_ipadapter_plus(&app_handle).await {
+        Ok(_) => {
+            info!("ComfyUI_IPAdapter_plus cloned successfully or already exists.");
+            emit_setup_progress(&app_handle, "installing_custom_nodes", "Custom node setup complete.", 100, None, None);
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to setup ComfyUI_IPAdapter_plus: {}", e);
+            error!("{}", err_msg);
+            // It's a non-critical error for now, so we log it and continue.
+            // If it were critical, we would emit "error" phase and return Err(err_msg).
+            // We'll emit a specific step error within the "installing_custom_nodes" phase.
+            emit_setup_progress(
+                &app_handle,
+                "installing_custom_nodes", // Keep the phase
+                "IPAdapter+ Clone Failed", // Specific step that failed
+                50, // Indicate partial progress or an issue within this phase
+                Some(err_msg.clone()), // Detail message for the frontend
+                Some(e.to_string()), // Error string
+            );
+            // Decide if this is a fatal error for the entire setup. For now, let's assume it's not.
+            // If it were fatal:
+            // emit_setup_progress(&app_handle, "error", "Custom Node Installation Failed", 0, Some(err_msg.clone()), Some(e.to_string()));
+            // return Err(err_msg);
+            warn!("Continuing setup despite custom node ComfyUI_IPAdapter_plus failing to clone: {}", e);
+            // Ensure the phase is marked as complete even with a warning, or handle as a distinct step.
+            // For simplicity, we'll mark the phase as "complete" but the frontend can show the error detail.
+            emit_setup_progress(&app_handle, "installing_custom_nodes", "Custom node setup finished (with issues for IPAdapter+).", 100, Some(format!("IPAdapter+ failed: {}", e)), None);
         }
     }
-    emit_setup_progress(&app_handle, "downloading_models", "All models downloaded.", 100, None, None);
+    // End of Installing Custom Nodes Phase
 
+    // Phase 3.5: Verification of Custom Nodes and Dependencies
+    emit_setup_progress(&app_handle, "verifying_dependencies", "Verifying custom node and Python package installations...", 0, None, None);
+    
+    let comfyui_dir_for_verify = get_comfyui_directory_path(&app_handle).map_err(|e| {
+        let err_msg = format!("Failed to get ComfyUI directory for verification: {}", e);
+        error!("[SETUP_ORCHESTRATION] {}", err_msg);
+        emit_setup_progress(&app_handle, "error", "Verification Path Error (ComfyUI Dir)", 0, Some(err_msg.clone()), Some(e.clone()));
+        err_msg
+    })?;
+
+    let venv_python_exe_for_verify = get_venv_python_executable_path(&app_handle).map_err(|e| {
+        let err_msg = format!("Failed to get venv Python executable for verification: {}", e);
+        error!("[SETUP_ORCHESTRATION] {}", err_msg);
+        emit_setup_progress(&app_handle, "error", "Verification Path Error (Venv Python)", 0, Some(err_msg.clone()), Some(e.clone()));
+        err_msg
+    })?;
+
+    // Verify IPAdapter Plus Directory
+    match check_ipadapter_plus_directory_exists(&app_handle, &comfyui_dir_for_verify).await {
+        Ok(true) => {
+            info!("[SETUP_ORCHESTRATION] IPAdapter Plus directory verification successful.");
+            emit_setup_progress(&app_handle, "verifying_dependencies", "IPAdapter+ directory found.", 33, None, None);
+        }
+        Ok(false) => {
+            let warn_msg = "ComfyUI_IPAdapter_plus directory not found. IPAdapter features may be unavailable.".to_string();
+            warn!("[SETUP_ORCHESTRATION] {}", warn_msg);
+            // Emitting progress with a warning, not halting
+            emit_setup_progress(&app_handle, "verifying_dependencies", "IPAdapter+ directory NOT found (Warning).", 33, Some(warn_msg), None);
+        }
+        Err(e) => {
+            let err_msg = format!("Error checking IPAdapter Plus directory: {}", e);
+            error!("[SETUP_ORCHESTRATION] {}", err_msg);
+            // Emitting progress with an error, but not halting for this specific check as per current plan for directory
+            emit_setup_progress(&app_handle, "verifying_dependencies", "IPAdapter+ directory check error.", 33, Some(err_msg), None);
+        }
+    }
+
+    // Verify onnxruntime import
+    match check_python_package_import(&app_handle, "onnxruntime", "script_check_onnx.py", &venv_python_exe_for_verify, &comfyui_dir_for_verify).await {
+        Ok(_) => {
+            info!("[SETUP_ORCHESTRATION] onnxruntime import verification successful.");
+            emit_setup_progress(&app_handle, "verifying_dependencies", "onnxruntime import successful.", 66, None, None);
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to verify onnxruntime import: {}. Critical features may be unavailable.", e);
+            error!("[SETUP_ORCHESTRATION] {}", err_msg);
+            emit_setup_progress(&app_handle, "error", "ONNXRuntime Verification Failed", 0, Some(err_msg.clone()), Some(e));
+            return Err(err_msg); // Halting setup
+        }
+    }
+
+    // Verify insightface import
+    match check_python_package_import(&app_handle, "insightface", "script_check_insightface.py", &venv_python_exe_for_verify, &comfyui_dir_for_verify).await {
+        Ok(_) => {
+            info!("[SETUP_ORCHESTRATION] insightface import verification successful.");
+            emit_setup_progress(&app_handle, "verifying_dependencies", "insightface import successful. Verification phase complete.", 100, None, None);
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to verify insightface import: {}. Critical features may be unavailable.", e);
+            error!("[SETUP_ORCHESTRATION] {}", err_msg);
+            emit_setup_progress(&app_handle, "error", "InsightFace Verification Failed", 0, Some(err_msg.clone()), Some(e));
+            return Err(err_msg); // Halting setup
+        }
+    }
+    // End of Verification Phase
+
+    // Phase 4: Downloading Models
+    emit_setup_progress(&app_handle, "downloading_models", "Initializing model download phase...", 0, None, None);
+
+    // Determine ComfyUI models base path
+    // Use the new utility function get_comfyui_directory_path
+    let comfyui_dir_for_models = get_comfyui_directory_path(&app_handle)?;
+    let comfyui_models_base_path = comfyui_dir_for_models.join("models");
+    info!("[SETUP_ORCHESTRATION] Determined ComfyUI models base path: {}", comfyui_models_base_path.display());
+
+    if !comfyui_models_base_path.exists() {
+        fs::create_dir_all(&comfyui_models_base_path).map_err(|e| {
+            format!("Failed to create ComfyUI models base directory at {}: {}", comfyui_models_base_path.display(), e)
+        })?;
+        info!("[SETUP_ORCHESTRATION] Created ComfyUI models base directory: {}", comfyui_models_base_path.display());
+    }
+    
+    let core_models = get_core_models_list();
+    if core_models.is_empty() {
+        info!("[SETUP_ORCHESTRATION] No core models configured for download.");
+        emit_setup_progress(&app_handle, "downloading_models", "No models to download.", 100, None, None);
+    } else {
+        emit_setup_progress(&app_handle, "downloading_models", "Starting download of core AI models...", 5, None, None);
+        match download_and_place_models(app_handle.clone(), &core_models, &comfyui_models_base_path).await {
+            Ok(_) => {
+                info!("All core models processed successfully.");
+                emit_setup_progress(&app_handle, "downloading_models", "All core models downloaded successfully.", 100, None, None);
+            }
+            Err(e) => {
+                let err_msg = format!("Failed to download one or more core models: {}", e);
+                error!("{}", err_msg);
+                // The `download_and_place_models` function emits overall progress,
+                // but we also need to signify the phase ended in error.
+                emit_setup_progress(&app_handle, "error", "Model Download Failed", 0, Some(err_msg.clone()), Some(e.to_string()));
+                return Err(err_msg);
+            }
+        }
+    }
 
     // Phase 5: Finalizing (Starting ComfyUI Sidecar and Health Check)
     if !comfyui_was_already_running_and_assumed_healthy {

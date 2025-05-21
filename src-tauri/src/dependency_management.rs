@@ -1,53 +1,26 @@
+use std::path::Path;
 use std::fs;
 use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
-use std::env;
-use std::path::PathBuf;
+// use std::env; // No longer needed directly here for path resolution
+use std::path::PathBuf; // Still needed for PathBuf type
 use log::{info, error};
-use uuid::Uuid;
-use scopeguard;
-use crate::gpu_detection::{GpuInfo, GpuType, get_gpu_info}; // Import from the gpu_detection module
-use tauri::{AppHandle, Manager, Wry, Emitter}; // Import AppHandle, Manager, Wry, and Emitter
-use serde::Serialize;
+use crate::gpu_detection::{GpuType, get_gpu_info};
+use tauri::{AppHandle, Wry}; // Removed unused Manager, Emitter
+// use serde::Serialize; // Unused
 use tokio::process::Command; // Replaced std::process::Command
 use std::process::Stdio; // Stdio is still needed
 use tokio::task; // Replaced std::thread
 use fs2::available_space; // Import available_space
-use tauri::path::BaseDirectory; // Import BaseDirectory
-use std::io::Write; // Import the Write trait
-use crate::setup; // To use emit_setup_progress
+// use std::io::Write; // Unused
+use crate::setup;
+// Import new python_utils functions
+use crate::setup_manager::python_utils::{
+    get_comfyui_directory_path,
+    get_bundled_python_executable_path,
+    get_venv_python_executable_path,
+};
 
-#[derive(Serialize, Clone, Debug, PartialEq)] // Added Debug and PartialEq
-#[serde(rename_all = "camelCase")]
-pub enum InstallationStep { // Used by the original install_python_dependencies for SplashScreen
-    CheckingDiskSpace,
-    CheckingExistingInstallation, // Renamed from CheckingDependencies
-    CreatingVirtualEnvironment,
-    InstallingNonTorchDependencies, // More specific
-    InstallingTorch,
-    VerifyingInstallation, // New step
-    InstallationComplete,
-    Error,
-}
-
-#[derive(Serialize, Clone, Debug)] // Added Debug
-#[serde(rename_all = "camelCase")]
-pub struct InstallationStatus { // Used by the original install_python_dependencies for SplashScreen
-    step: InstallationStep,
-    message: String,
-    is_error: bool,
-}
-
-// Function to emit installation status events (for original SplashScreen compatibility)
-fn emit_installation_status(app_handle: &AppHandle<Wry>, step: InstallationStep, message: String, is_error: bool) {
-    let status = InstallationStatus {
-        step,
-        message,
-        is_error,
-    };
-    if let Err(e) = app_handle.emit("installation-status", status) {
-        error!("Failed to emit installation-status event: {}", e);
-    }
-}
+// Unused InstallationStep enum, InstallationStatus struct, and emit_installation_status function are fully removed.
 
 // This function executes a command and streams its stdout and stderr,
 // logging each line with 'info!' for stdout and 'error!' for stderr.
@@ -71,12 +44,75 @@ async fn run_command_for_setup_progress(
     let step_name_initial = format!("{}: {}", current_step_base, initial_message);
     setup::emit_setup_progress(app_handle, phase, &step_name_initial, progress_current_phase, Some(initial_message.to_string()), None);
 
-    let mut child = Command::new(command_path)
-        .current_dir(current_dir)
+    let mut cmd = Command::new(command_path);
+    cmd.current_dir(current_dir)
         .args(args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+
+    // Specifically for venv creation, clear potentially problematic env vars
+    if current_step_base == "Creating virtual environment" {
+        cmd.env_remove("PYTHONHOME");
+        cmd.env_remove("PYTHONPATH");
+        info!("Cleared PYTHONHOME and PYTHONPATH for venv creation command.");
+    }
+
+    // --- Start Debug Logging for Environment ---
+    info!("Debug: About to spawn command for setup.");
+    info!("Debug: Current Directory: {:?}", current_dir);
+    info!("Debug: Command Path: {:?}", command_path);
+    info!("Debug: Arguments: {:?}", args);
+
+    // Log environment variables - Be cautious not to log sensitive info in production
+    #[cfg(debug_assertions)] // Only log in debug builds
+    {
+        info!("Debug: Environment Variables:");
+        for (key, value) in std::env::vars() {
+            // Filter out potentially sensitive variables if necessary, e.g., API keys, passwords
+            let key_str = key;
+            if !key_str.contains("API_KEY") && !key_str.contains("PASSWORD") {
+                 info!("  {}: {:?}", key_str, value);
+            } else {
+                 info!("  {}: [REDACTED]", key_str);
+            }
+        }
+    }
+    info!("Debug: Finished logging environment.");
+    // --- End Debug Logging for Environment ---
+
+    // --- Start Modify PATH for Bundled Python and Venv ---
+    info!("Modifying PATH to prioritize bundled Python and Venv...");
+
+    let bundled_python_exe = get_bundled_python_executable_path(app_handle)?;
+    let bundled_python_dir = bundled_python_exe.parent()
+        .ok_or_else(|| "Failed to get bundled Python directory".to_string())?;
+
+    // Get the venv bin/Scripts directory
+    let venv_python_exe = get_venv_python_executable_path(app_handle)?;
+    let venv_bin_dir = venv_python_exe.parent()
+        .ok_or_else(|| "Failed to get venv bin directory".to_string())?;
+
+
+    let current_system_path = std::env::var("PATH")
+        .unwrap_or_else(|_| "".to_string()); // Get existing PATH or empty string
+
+    let system_path_buf = PathBuf::from(current_system_path); // Create a longer-lived PathBuf
+
+    let new_path_dirs: Vec<&Path> = vec![
+        venv_bin_dir.as_ref(), // Venv bin/Scripts first
+        bundled_python_dir.as_ref(), // Bundled Python dir second
+        system_path_buf.as_ref(), // Use the longer-lived reference
+    ];
+
+    let new_path = std::env::join_paths(new_path_dirs)
+        .map_err(|e| format!("Failed to join paths for new PATH: {}", e))?;
+
+    cmd.env("PATH", &new_path);
+
+    info!("Debug: Set new PATH for spawned command: {:?}", new_path);
+    // --- End Modify PATH ---
+
+    let mut child = cmd.spawn()?;
 
     let stdout = child.stdout.take().ok_or(format!("{} - Failed to capture stdout", error_message_prefix))?;
     let stderr = child.stderr.take().ok_or(format!("{} - Failed to capture stderr", error_message_prefix))?;
@@ -116,11 +152,16 @@ async fn run_command_for_setup_progress(
 
     let status = child.wait().await?;
 
+    // Debug: Log the raw exit status immediately after waiting
+    info!("Debug: Command exit status: {:?}", status);
+
     stdout_task.await.map_err(|e| format!("Stdout task (setup) panicked: {:?}", e))?;
     stderr_task.await.map_err(|e| format!("Stderr task (setup) panicked: {:?}", e))?;
 
     if !status.success() {
-        let error_msg = format!("{} failed with status: {:?}", error_message_prefix, status);
+        // Enhance error message to include the full command string
+        let command_string = format!("{:?} {:?}", command_path, args);
+        let error_msg = format!("{} failed with status: {:?}. Command: {}", error_message_prefix, status, command_string);
         error!("{}", error_msg);
         setup::emit_setup_progress(app_handle, phase, error_message_prefix, progress_current_phase, Some(error_msg.clone()), Some(error_msg.clone()));
         return Err(error_msg.into());
@@ -133,78 +174,13 @@ async fn run_command_for_setup_progress(
     Ok(progress_current_phase.min(100))
 }
 
-
-// Original function to install Python dependencies (for SplashScreen compatibility)
-// This function will continue to use `emit_installation_status`
 // Estimated required disk space for ComfyUI dependencies (20 GB)
 const REQUIRED_DISK_SPACE: u64 = 20 * 1024 * 1024 * 1024; // in bytes
 
-pub async fn install_python_dependencies(app_handle: &AppHandle<Wry>) -> Result<(), Box<dyn std::error::Error>> {
-    info!("Checking disk space (original function)...");
-    emit_installation_status(app_handle, InstallationStep::CheckingDiskSpace, "Checking available disk space...".into(), false);
-
-    let exe_path = std::env::current_exe()?;
-    let exe_dir = exe_path.parent().ok_or("Failed to get executable directory (original function)")?;
-    
-    let comfyui_dir = if cfg!(debug_assertions) {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("Failed to get parent of CARGO_MANIFEST_DIR for debug comfyui_dir (original function)")
-            .join("target").join("debug").join("vendor").join("comfyui")
-    } else {
-        exe_dir.join("vendor/comfyui")
-    };
-
-    match available_space(&comfyui_dir) {
-        Ok(available) => {
-            if available < REQUIRED_DISK_SPACE {
-                let err_msg = format!("Insufficient disk space (original function). Required: {:.2} GB, Available: {:.2} GB.", REQUIRED_DISK_SPACE as f64 / (1024.0 * 1024.0 * 1024.0), available as f64 / (1024.0 * 1024.0 * 1024.0));
-                error!("{}", err_msg);
-                emit_installation_status(app_handle, InstallationStep::Error, err_msg.clone(), true);
-                return Err(err_msg.into());
-            }
-            emit_installation_status(app_handle, InstallationStep::CheckingDiskSpace, "Sufficient disk space available (original function).".into(), false);
-        }
-        Err(e) => {
-            let err_msg = format!("Failed to check disk space (original function) at {}: {}", comfyui_dir.display(), e);
-            error!("{}", err_msg);
-            emit_installation_status(app_handle, InstallationStep::Error, err_msg.clone(), true);
-            return Err(err_msg.into());
-        }
-    }
-
-    emit_installation_status(app_handle, InstallationStep::CheckingExistingInstallation, "Checking existing installation (original function)...".into(), false);
-    let app_data_dir = app_handle.path().app_data_dir()?;
-    let marker_file_path = app_data_dir.join("dependencies_installed_marker_original"); // Use a different marker
-
-    if marker_file_path.exists() {
-        info!("Python dependencies already installed (original function marker found).");
-        emit_installation_status(app_handle, InstallationStep::InstallationComplete, "Dependencies already installed (original function).".into(), false);
-        return Ok(());
-    }
-    
-    // ... (rest of the original install_python_dependencies logic using emit_installation_status and its own run_command helper if it had one)
-    // For brevity, I'm not fully replicating the entire original pip install logic here,
-    // as the main task is to create the new `_with_progress` version.
-    // Assume it would call a version of run_command that uses `emit_installation_status`.
-    // This part would need careful restoration if the original function's detailed steps are critical for SplashScreen.
-    // For now, let's simulate its completion for demonstration.
-
-    info!("Simulating original dependency installation steps...");
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await; // Simulate work
-    emit_installation_status(app_handle, InstallationStep::CreatingVirtualEnvironment, "Creating venv (original)...".into(), false);
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    emit_installation_status(app_handle, InstallationStep::InstallingNonTorchDependencies, "Installing non-torch (original)...".into(), false);
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    emit_installation_status(app_handle, InstallationStep::InstallingTorch, "Installing torch (original)...".into(), false);
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    emit_installation_status(app_handle, InstallationStep::VerifyingInstallation, "Verifying (original)...".into(), false);
-    
-    fs::write(&marker_file_path, "installed")?;
-    info!("Created marker file for original installation: {}", marker_file_path.display());
-    emit_installation_status(app_handle, InstallationStep::InstallationComplete, "Original dependencies installed successfully.".into(), false);
-    Ok(())
-}
+// Unused function install_python_dependencies removed.
+// pub async fn install_python_dependencies(app_handle: &AppHandle<Wry>) -> Result<(), Box<dyn std::error::Error>> {
+//     ...
+// }
 
 
 // New function for SetupScreen with detailed progress
@@ -215,17 +191,10 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
     info!("Checking disk space (with progress)...");
     setup::emit_setup_progress(app_handle, phase_name, "Checking available disk space...", current_phase_progress, None, None);
 
-    let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get current exe path: {}", e))?;
-    let exe_dir = exe_path.parent().ok_or_else(|| "Failed to get executable directory".to_string())?;
+    // let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get current exe path: {}", e))?; // Replaced
+    // let exe_dir = exe_path.parent().ok_or_else(|| "Failed to get executable directory".to_string())?; // Replaced
     
-    let comfyui_dir = if cfg!(debug_assertions) {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("Failed to get parent of CARGO_MANIFEST_DIR for debug comfyui_dir")
-            .join("target").join("debug").join("vendor").join("comfyui")
-    } else {
-        exe_dir.join("vendor/comfyui")
-    };
+    let comfyui_dir = get_comfyui_directory_path(app_handle)?;
 
     match available_space(&comfyui_dir) {
         Ok(available) => {
@@ -255,11 +224,8 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
     // This is different from the Master Installation Marker.
     let internal_deps_marker_path = comfyui_dir.join(".venv_deps_installed.marker");
 
-    let python_executable = if cfg!(debug_assertions) {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().ok_or("Failed to get parent dir")?.join("target").join("debug").join("vendor").join("python").join("python.exe")
-    } else {
-        exe_dir.join("vendor/python/python.exe")
-    };
+    let python_executable = get_bundled_python_executable_path(app_handle)?;
+    
     if !python_executable.exists() {
         let err_msg = format!("Bundled Python executable not found at {}", python_executable.display());
         error!("{}", err_msg);
@@ -267,8 +233,8 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
         return Err(err_msg);
     }
 
-    let venv_dir = comfyui_dir.join(".venv");
-    let venv_python_executable = if cfg!(target_os = "windows") { venv_dir.join("Scripts").join("python.exe") } else { venv_dir.join("bin").join("python") };
+    let venv_dir = comfyui_dir.join(".venv"); // Define venv_dir as it's used directly
+    let venv_python_executable = get_venv_python_executable_path(app_handle)?;
 
     let requirements_path = comfyui_dir.join("requirements.txt");
      info!("Attempting to access requirements.txt at: {}", requirements_path.display());
@@ -295,12 +261,12 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
         info!("Virtual environment not found at {}. Creating...", venv_dir.display());
         current_phase_progress = run_command_for_setup_progress(
             app_handle, phase_name, "Creating virtual environment", current_phase_progress, 15, // Weight: 15%
-            &python_executable, &["-m", "venv", venv_dir.to_str().unwrap()], &comfyui_dir,
+            &python_executable, &["-m", "venv", "--without-pip", venv_dir.to_str().unwrap()], &comfyui_dir, // Removed --upgrade-deps
             "Initializing...", "Virtual environment created."
-        ).await.map_err(|e| e.to_string())?; // After venv creation, progress is 30 (15 base + 15 weight)
+        ).await.map_err(|e| e.to_string())?; // After venv creation, progress is 25 (15 base + 10 weight)
     } else {
         info!("Virtual environment found at {}. Skipping creation.", venv_dir.display());
-        current_phase_progress = std::cmp::max(current_phase_progress, 30); // Assume venv creation part is done
+        current_phase_progress = std::cmp::max(current_phase_progress, 25); // Assume venv creation part is done
         setup::emit_setup_progress(app_handle, phase_name, "Virtual environment already exists.", current_phase_progress, None, None);
     }
     
@@ -311,6 +277,78 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
         fs::remove_file(&internal_deps_marker_path).map_err(|e| format!("Failed to remove old internal marker: {}", e))?;
     }
 
+    // Step: Download get-pip.py
+    info!("Downloading get-pip.py...");
+    let get_pip_url = "https://bootstrap.pypa.io/get-pip.py";
+    let get_pip_path = comfyui_dir.join("get-pip.py");
+    
+    setup::emit_setup_progress(app_handle, phase_name, "Downloading get-pip.py", current_phase_progress, Some(format!("From: {}", get_pip_url)), None);
+
+    match reqwest::get(get_pip_url).await {
+        Ok(response) => {
+            if response.status().is_success() {
+                let mut file = match tokio::fs::File::create(&get_pip_path).await {
+                    Ok(f) => f,
+                    Err(e) => {
+                        let err_msg = format!("Failed to create get-pip.py file at {}: {}", get_pip_path.display(), e);
+                        error!("{}", err_msg);
+                        setup::emit_setup_progress(app_handle, "error", "File Creation Error", current_phase_progress, Some(err_msg.clone()), Some(err_msg.clone()));
+                        return Err(err_msg);
+                    }
+                };
+                let content = match response.bytes().await {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        let err_msg = format!("Failed to read get-pip.py response bytes: {}", e);
+                        error!("{}", err_msg);
+                        setup::emit_setup_progress(app_handle, "error", "Download Error", current_phase_progress, Some(err_msg.clone()), Some(err_msg.clone()));
+                        return Err(err_msg);
+                    }
+                };
+                match tokio::io::AsyncWriteExt::write_all(&mut file, &content).await {
+                    Ok(_) => {
+                        info!("Successfully downloaded get-pip.py to {}", get_pip_path.display());
+                        current_phase_progress += 5; // Weight: 5% for download
+                        setup::emit_setup_progress(app_handle, phase_name, "get-pip.py downloaded.", current_phase_progress, None, None);
+                    },
+                    Err(e) => {
+                        let err_msg = format!("Failed to write get-pip.py content to file: {}", e);
+                        error!("{}", err_msg);
+                        setup::emit_setup_progress(app_handle, "error", "File Write Error", current_phase_progress, Some(err_msg.clone()), Some(err_msg.clone()));
+                        return Err(err_msg);
+                    }
+                }
+            } else {
+                let err_msg = format!("Failed to download get-pip.py: HTTP status {}", response.status());
+                error!("{}", err_msg);
+                setup::emit_setup_progress(app_handle, "error", "Download Failed", current_phase_progress, Some(err_msg.clone()), Some(err_msg.clone()));
+                return Err(err_msg);
+            }
+        },
+        Err(e) => {
+            let err_msg = format!("Failed to send request to download get-pip.py: {}", e);
+            error!("{}", err_msg);
+            setup::emit_setup_progress(app_handle, "error", "Network Error", current_phase_progress, Some(err_msg.clone()), Some(err_msg.clone()));
+            return Err(err_msg);
+        }
+    }
+
+    // Step: Execute get-pip.py
+    info!("Executing get-pip.py...");
+    current_phase_progress = run_command_for_setup_progress(
+        app_handle, phase_name, "Installing pip using get-pip.py", current_phase_progress, 10, // Weight: 10% for execution
+        &venv_python_executable, &[get_pip_path.to_str().unwrap()], &comfyui_dir,
+        "Running get-pip.py...", "pip installed via get-pip.py."
+    ).await.map_err(|e| e.to_string())?; // After get-pip.py execution, progress is 40 (25 base + 5 download + 10 exec)
+
+    // Step: Clean up get-pip.py
+    info!("Cleaning up get-pip.py...");
+    match tokio::fs::remove_file(&get_pip_path).await {
+        Ok(_) => info!("Successfully removed get-pip.py"),
+        Err(e) => error!("Failed to remove get-pip.py at {}: {}", get_pip_path.display(), e),
+    }
+    // No progress update for cleanup, it's a minor step
+
     // Step: Install PyTorch, Torchvision, Torchaudio explicitly
     info!("Attempting to install PyTorch, Torchvision, and Torchaudio explicitly...");
     let torch_packages = vec![
@@ -318,20 +356,18 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
         "torchvision==0.18.1".to_string(),
         "torchaudio==2.3.1".to_string(),
     ];
-    let mut pip_torch_args: Vec<String> = vec![
+    let mut pip_torch_args: Vec<String> = vec![ // This variable will be populated with torch_packages and index urls
         "-m".to_string(),
         "pip".to_string(),
         "install".to_string(),
         "-vvv".to_string(),
         "--no-cache-dir".to_string(),
     ];
-    pip_torch_args.extend(torch_packages);
+    // pip_torch_args.extend(torch_packages); // Will extend after determining index URL
     
     // Determine torch_index_url_to_use
     let gpu_info_for_torch_step = get_gpu_info();
-    let mut torch_index_url_for_explicit_install: Option<String> = None;
-
-    if gpu_info_for_torch_step.gpu_type == GpuType::Nvidia {
+    let torch_index_url_for_explicit_install: Option<String> = if gpu_info_for_torch_step.gpu_type == GpuType::Nvidia {
         if let Some(cuda_ver_str_ref) = gpu_info_for_torch_step.cuda_version.as_deref() {
             if !cuda_ver_str_ref.is_empty() {
                 let cuda_ver_str = cuda_ver_str_ref.to_string();
@@ -344,43 +380,46 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
                                  error!("(Explicit Torch Install) Unsupported NVIDIA CUDA version prefix: {}. Falling back to CPU PyTorch.", cuda_ver_str);
                                  "cpu".to_string()
                              };
-                if suffix != "cpu" {
-                    torch_index_url_for_explicit_install = Some(format!("https://download.pytorch.org/whl/{}", suffix));
-                } else {
-                    // This branch is reached if suffix is "cpu" due to unsupported version or explicit fallback
-                    torch_index_url_for_explicit_install = Some("https://download.pytorch.org/whl/cpu".to_string());
-                }
-            } else {
-                error!("(Explicit Torch Install) NVIDIA GPU detected, but CUDA version string is empty. Falling back to CPU PyTorch for explicit install.");
-                torch_index_url_for_explicit_install = Some("https://download.pytorch.org/whl/cpu".to_string());
-            }
-        } else {
-            error!("(Explicit Torch Install) NVIDIA GPU detected, but no CUDA version found. Falling back to CPU PyTorch for explicit install.");
-            torch_index_url_for_explicit_install = Some("https://download.pytorch.org/whl/cpu".to_string());
-        }
-    } else {
-        info!("(Explicit Torch Install) Non-NVIDIA GPU detected ({:?}). Using CPU PyTorch for explicit install.", gpu_info_for_torch_step.gpu_type);
-        torch_index_url_for_explicit_install = Some("https://download.pytorch.org/whl/cpu".to_string());
-    }
+               if suffix != "cpu" {
+                   Some(format!("https://download.pytorch.org/whl/{}", suffix))
+               } else {
+                   Some("https://download.pytorch.org/whl/cpu".to_string())
+               }
+           } else {
+               error!("(Explicit Torch Install) NVIDIA GPU detected, but CUDA version string is empty. Falling back to CPU PyTorch for explicit install.");
+               Some("https://download.pytorch.org/whl/cpu".to_string())
+           }
+       } else {
+           error!("(Explicit Torch Install) NVIDIA GPU detected, but no CUDA version found. Falling back to CPU PyTorch for explicit install.");
+           Some("https://download.pytorch.org/whl/cpu".to_string())
+       }
+   } else {
+       info!("(Explicit Torch Install) Non-NVIDIA GPU detected ({:?}). Using CPU PyTorch for explicit install.", gpu_info_for_torch_step.gpu_type);
+       Some("https://download.pytorch.org/whl/cpu".to_string())
+   };
 
-    if let Some(url) = &torch_index_url_for_explicit_install {
-        info!("Using PyTorch index URL for explicit torch install: {}", url);
-        pip_torch_args.push("--index-url".to_string());
-        pip_torch_args.push(url.clone());
-        pip_torch_args.push("--extra-index-url".to_string()); // Add PyPI as extra for torch's own dependencies
-        pip_torch_args.push("https://pypi.org/simple".to_string());
-    } else {
-        // This case should ideally not be reached if the logic above always sets a URL (even if CPU)
-        error!("Critical error: Could not determine PyTorch index URL for explicit install. Attempting with CPU fallback and PyPI.");
-        pip_torch_args.push("--index-url".to_string());
-        pip_torch_args.push("https://download.pytorch.org/whl/cpu".to_string());
-        pip_torch_args.push("--extra-index-url".to_string());
-        pip_torch_args.push("https://pypi.org/simple".to_string());
-    }
+   // Now build pip_torch_args using the determined torch_index_url_for_explicit_install
+   pip_torch_args.extend(torch_packages); // Add the torch packages first
 
-    let pip_torch_args_refs: Vec<&str> = pip_torch_args.iter().map(|s| s.as_str()).collect();
-    current_phase_progress = run_command_for_setup_progress(
-        app_handle, phase_name, "Installing PyTorch, Torchvision, Torchaudio", current_phase_progress, 30, // Assign some progress weight
+   if let Some(url) = &torch_index_url_for_explicit_install {
+       info!("Using PyTorch index URL for explicit torch install: {}", url);
+       pip_torch_args.push("--index-url".to_string());
+       pip_torch_args.push(url.clone());
+       pip_torch_args.push("--extra-index-url".to_string()); // Add PyPI as extra for torch's own dependencies
+       pip_torch_args.push("https://pypi.org/simple".to_string());
+   } else {
+       // This case should ideally not be reached if the logic above always sets a URL (even if CPU)
+       error!("Critical error: Could not determine PyTorch index URL for explicit install. Attempting with CPU fallback and PyPI.");
+       // Fallback to CPU and PyPI if no URL was determined (should not happen with current logic)
+       pip_torch_args.push("--index-url".to_string());
+       pip_torch_args.push("https://download.pytorch.org/whl/cpu".to_string());
+       pip_torch_args.push("--extra-index-url".to_string());
+       pip_torch_args.push("https://pypi.org/simple".to_string());
+   }
+
+   let pip_torch_args_refs: Vec<&str> = pip_torch_args.iter().map(|s| s.as_str()).collect();
+   current_phase_progress = run_command_for_setup_progress(
+        app_handle, phase_name, "Installing PyTorch, Torchvision, Torchaudio", current_phase_progress, 30, // Weight: 30% (40 base + 30 weight = 70)
         &venv_python_executable, &pip_torch_args_refs,
         &comfyui_dir,
         "Starting explicit PyTorch installation...", "PyTorch, Torchvision, Torchaudio installed."
@@ -399,7 +438,7 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
     ];
     let pip_numpy_args_refs: Vec<&str> = pip_numpy_args.iter().map(|s| s.as_str()).collect();
     current_phase_progress = run_command_for_setup_progress(
-        app_handle, phase_name, "Installing NumPy 1.x", current_phase_progress, 5, // Small weight for this
+        app_handle, phase_name, "Installing NumPy 1.x", current_phase_progress, 5, // Weight: 5% (70 base + 5 weight = 75)
         &venv_python_executable, &pip_numpy_args_refs,
         &comfyui_dir,
         "Starting NumPy 1.x installation...", "NumPy 1.x installed."
@@ -408,7 +447,7 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
 
     // Step: Install remaining dependencies from requirements.txt
     info!("Installing remaining dependencies from requirements.txt...");
-    let mut pip_args_combined: Vec<String> = vec![
+    let pip_args_combined: Vec<String> = vec![
         "-m".to_string(),
         "pip".to_string(),
         "install".to_string(),
@@ -427,7 +466,7 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
 
     let script_args_combined_refs: Vec<&str> = pip_args_combined.iter().map(|s| s.as_str()).collect();
     current_phase_progress = run_command_for_setup_progress(
-        app_handle, phase_name, "Installing remaining dependencies from requirements.txt", current_phase_progress, 25, // Adjusted weight (30+25=55 original)
+        app_handle, phase_name, "Installing remaining dependencies from requirements.txt", current_phase_progress, 20, // Weight: 20% (75 base + 20 weight = 95)
         &venv_python_executable, &script_args_combined_refs,
         &comfyui_dir,
         "Starting installation of remaining dependencies...", "Remaining dependencies installed."
@@ -443,12 +482,13 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
         return Err(err_msg);
     }
 
-    current_phase_progress = run_command_for_setup_progress(
-        app_handle, phase_name, "Verifying PyTorch CUDA Setup", current_phase_progress, 10, // Weight: 10% (Total 85+10=95)
+    let _ = run_command_for_setup_progress( // Assign to _ to mark as intentionally unused
+        app_handle, phase_name, "Verifying PyTorch CUDA Setup", current_phase_progress, 5, // Weight: 5% (95 base + 5 weight = 100)
         &venv_python_executable, &[check_torch_py_path.to_str().ok_or_else(|| "Failed to convert check_torch.py path to string".to_string())?],
         &comfyui_dir, // Run check_torch.py from within comfyui_dir
         "Running PyTorch verification script...", "PyTorch verification script finished."
     ).await.map_err(|e| e.to_string())?;
+    // current_phase_progress is updated internally by run_command_for_setup_progress and emitted
     
     // Final step: marker file
     current_phase_progress = 100; // Ensure it reaches 100
@@ -459,11 +499,11 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
     Ok(())
 }
 
-// Function to write the temporary Python script
-pub fn write_temp_python_script(content: &str, file_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    info!("Writing temporary Python script to: {}", file_path.display());
-    let mut file = fs::File::create(file_path)?;
-    file.write_all(content.as_bytes())?;
-    info!("Temporary Python script written successfully.");
-    Ok(())
-}
+// Unused function write_temp_python_script removed.
+// pub fn write_temp_python_script(content: &str, file_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+//     info!("Writing temporary Python script to: {}", file_path.display());
+//     let mut file = fs::File::create(file_path)?;
+//     file.write_all(content.as_bytes())?;
+//     info!("Temporary Python script written successfully.");
+//     Ok(())
+// }

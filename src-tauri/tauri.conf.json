@@ -45,7 +45,9 @@
     "resources": [
       "../resources/workflows/face_workflow_template.json",
       "../resources/workflows/fullbody_workflow_template.json",
-      "../vendor/comfyui/requirements.txt"
+      "../vendor/comfyui/requirements.txt",
+      "scripts/script_check_onnx.py",
+      "scripts/script_check_insightface.py"
     ]
   },
   "plugins": {

@@ -1,6 +1,6 @@
 // metamorphosis-app/src-tauri/src/sidecar_manager/event_utils.rs
 
-use tauri::{AppHandle, Emitter, Manager, Wry};
+use tauri::{AppHandle, Emitter, Wry};
 use log::error;
 use serde_json::json;
 
