@@ -60,7 +60,7 @@ const styles = `
 
 
 // Setup phases in order (from existing)
-type SetupPhase = 'checking' | 'installing_comfyui' | 'python_setup' | 'downloading_models' | 'finalizing' | 'complete' | 'error';
+type SetupPhase = 'checking' | 'installing_comfyui' | 'python_setup' | 'installing_custom_nodes' | 'downloading_models' | 'finalizing' | 'complete' | 'error';
 
 interface SetupProgress { // This should align with Rust's SetupProgressPayload
   phase: SetupPhase;
@@ -190,6 +190,7 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
     checking: 'System Check',
     installing_comfyui: 'ComfyUI Setup',
     python_setup: 'Python Setup',
+    installing_custom_nodes: 'Custom Node Setup', // Added missing phase name
     downloading_models: 'Model Downloads',
     finalizing: 'Finalizing',
     complete: 'Complete',
@@ -319,10 +320,33 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
           console.log('[SetupScreen] setup-progress event received.');
           try {
             const payload = event.payload as SetupProgress;
-            setSetupProgress(payload);
+            
+            setSetupProgress(prev => {
+              const currentPhaseIndex = phaseDisplayOrder.indexOf(prev.phase);
+              const receivedPhaseIndex = phaseDisplayOrder.indexOf(payload.phase);
+ 
+              // Only update if the received phase is the same as or comes after the current phase
+              if (receivedPhaseIndex >= currentPhaseIndex || payload.phase === 'error') {
+                 console.log(`[SetupScreen] Updating progress to phase: ${payload.phase}, progress: ${payload.progress}`);
+                return payload;
+              } else {
+                 console.log(`[SetupScreen] Ignoring progress update for earlier phase: ${payload.phase}. Current phase: ${prev.phase}`);
+                return prev; // Ignore update for earlier phase
+              }
+            });
+            console.log(`[SetupScreen] Current phase after setSetupProgress: ${payload.phase}`); // Log updated phase
+
             if (payload.phase === 'complete') {
-              console.log('[SetupScreen] Received complete phase, calling onComplete.');
-              onComplete();
+              console.log('[SetupScreen] Condition (payload.phase === "complete") is TRUE.');
+              if (typeof onComplete === 'function') {
+                console.log('[SetupScreen] onComplete is a function. Calling onComplete().');
+                onComplete();
+                console.log('[SetupScreen] onComplete() has been called.');
+              } else {
+                console.error('[SetupScreen] onComplete is NOT a function! Type:', typeof onComplete);
+              }
+            } else {
+              // console.log(`[SetupScreen] Condition (payload.phase === "complete") is FALSE. Current phase: ${payload.phase}`);
             }
           } catch (error) {
             console.error('[SetupScreen] Error inside setup-progress listener:', error);
@@ -431,6 +455,18 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
           setCustomNodeInstallState(prev => ({ ...prev, pipUpdateStatus: 'failed', pipUpdateError: payload.error, currentActionMessage: 'Pip update failed.' }));
         });
 
+        // Listener for granular pip output
+        const unlistenPipOutput = await listen('pip-output', (event) => {
+          console.log('[SetupScreen] pip-output event received.');
+          const payload = event.payload as { packageName: string; output: string; stream: 'stdout' | 'stderr' };
+          // Update the detail message with the pip output line
+          setSetupProgress(prev => ({
+            ...prev,
+            detailMessage: `${payload.packageName} (${payload.stream}): ${payload.output}`
+          }));
+        });
+
+
         return () => {
           unlistenSetup();
           // unlistenModels(); // Ensure old model listener cleanup is also commented
@@ -450,6 +486,7 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
           unlistenPipUpdateStart();
           unlistenPipUpdateSuccess();
           unlistenPipUpdateFailed();
+          unlistenPipOutput(); // Cleanup the new listener
         };
       } catch (error) {
         console.error('[SetupScreen] Tauri API interaction failed:', error);
@@ -555,8 +592,9 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
                 </p>
               </div>
               
-              {setupProgress.phase !== 'complete' && setupProgress.phase !== 'error' && (
+              {setupProgress.phase !== 'complete' && setupProgress.phase !== 'error' && setupProgress.phase !== 'downloading_models' && (
                 <div className="bg-gray-50 rounded-lg p-4 mb-6">
+                  <h3 className="text-md font-semibold text-gray-700 mb-3">Current Phase Progress</h3>
                   <div className="flex justify-between mb-2">
                     <span className="text-sm font-medium text-gray-700">Current Step Progress</span>
                     <span className="text-sm font-medium text-purple-700">
@@ -573,7 +611,9 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
               )}
 
               {/* Custom Node Installation Status Display */}
-              <SetupCustomNodeInstallerStatus installState={customNodeInstallState} />
+              {(setupProgress.phase === 'python_setup' || setupProgress.phase === 'installing_custom_nodes') && (
+                <SetupCustomNodeInstallerStatus installState={customNodeInstallState} />
+              )}
               
               {/* Render SetupModelDownloader when in the downloading_models phase */}
               {setupProgress.phase === 'downloading_models' && (
@@ -628,7 +668,8 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
                   </div>
                   <h3 className="text-xl font-semibold text-green-800 mb-2">Setup Complete!</h3>
                   <p className="text-green-600">
-                    Metamorphosis is ready to use. Taking you to the title screen...
+                    Metamorphosis is ready to use.
+                    {typeof onComplete === 'function' ? " Click 'Start Game' to proceed." : " Preparing to transition..."}
                   </p>
                   <div className="mt-6 inline-block">
                     <div className="relative">

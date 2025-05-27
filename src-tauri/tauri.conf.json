@@ -12,15 +12,40 @@
   "app": {
     "withGlobalTauri": true,
     "security": {
-      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: localhost:3000 localhost:8188 ws://localhost:3000 ws://localhost:8188 http://localhost:3000 http://localhost:8188; connect-src 'self' ipc: ws: localhost:3000 localhost:8188 http://localhost:3000 http://localhost:8188 ws://localhost:3000 ws://localhost:8188"
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: localhost:3000 localhost:8188 ws://localhost:3000 ws://localhost:8188 http://localhost:3000 http://localhost:8188; connect-src 'self' ipc: ws: localhost:3000 localhost:8188 http://localhost:3000 http://localhost:8188 ws://localhost:3000 ws://localhost:8188",
+      "capabilities": [
+        {
+          "identifier": "main-window-capabilities",
+          "description": "Capabilities for the main application window",
+          "windows": ["main"],
+          "permissions": [
+            "core:window:allow-set-size",
+            "core:window:allow-set-fullscreen",
+            "core:window:allow-set-decorations",
+            "core:window:allow-primary-monitor",
+            "core:event:allow-listen",
+            "core:event:default",
+            "core:window:allow-is-decorated",
+            "core:window:allow-is-fullscreen",
+            "core:path:default",
+            "fs:allow-read-text-file",
+            {
+              "identifier": "http:default",
+              "allow": [
+                { "url": "http://127.0.0.1:8188/*" }
+              ]
+            }
+          ]
+        }
+      ]
     },
     "windows": [
       {
         "fullscreen": false,
-        "height": 700,
+        "height": 720,
         "resizable": true,
         "title": "Metamorphosis",
-        "width": 900,
+        "width": 1280,
         "url": "loading.html",
         "visible": false,
         "focus": true,

@@ -2,6 +2,14 @@
 
 import React, { useEffect, useState } from "react";
 import "./globals.css";
+import { Quicksand } from 'next/font/google';
+
+const quicksand = Quicksand({
+  subsets: ['latin'],
+  display: 'swap',
+  weight: ['300', '400', '500', '600', '700'], // Adjust weights as needed
+  variable: '--font-quicksand',
+});
 
 export default function RootLayout({
   children,
@@ -57,13 +65,17 @@ export default function RootLayout({
   }, []);
   
   return (
+    // Remove quicksand.variable from html, will apply quicksand.className to body
     <html lang="en">
+      {/* Ensure no whitespace before <head> */}
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="description" content="Metamorphosis character creation platform" />
         <title>Metamorphosis</title>
       </head>
-      <body>
+      {/* Ensure no whitespace before <body> */}
+      {/* Apply quicksand.className directly to body, remove font-sans as className handles it */}
+      <body className={quicksand.className}>
         {/* Data attribute for Tauri status tracking in CSS/devtools */}
         <div data-tauri-initialized={tauriInitialized}>
           {children}

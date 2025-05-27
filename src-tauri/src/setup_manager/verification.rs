@@ -3,7 +3,6 @@ use tauri::{WebviewWindow, AppHandle, Manager, Wry, Emitter};
 use serde_json::json;
 use log::{error, info, warn};
 use std::path::Path; // PathBuf is no longer directly used here
-// use tauri::path::BaseDirectory;
 use std::fs;
 use std::process::{Command, Stdio};
 use std::io::{BufReader, BufRead};
@@ -121,19 +120,20 @@ pub async fn check_initialization_status(window: WebviewWindow) -> Result<(), St
         Ok(python_path) => {
             if python_path.exists() && python_path.is_file() {
                 info!("[SETUP_VERIFICATION] Python executable path verified at {:?}", python_path);
-                window.emit("initialization-status", json!({ "status": "progress", "stage": "CheckingPythonPath", "progress": 50, "message": "Verifying Python environment..." })).map_err(|e| e.to_string())?;
+                window.emit("initialization-status", json!({ "status": "progress", "stage": "CheckingPythonPath", "progress": 50, "message": "Python executable found." })).map_err(|e| e.to_string())?;
             } else {
-                let error_msg = format!("Python executable not found or is not a file at resolved path: {:?}", python_path);
-                error!("[SETUP_VERIFICATION] {}", error_msg);
-                window.emit("initialization-status", json!({ "status": "error", "message": format!("Initialization failed: {}", error_msg) })).ok();
-                return Err(error_msg);
+                let warning_msg = format!("Bundled Python executable not found or is not a file at resolved path: {:?}. This is expected on first run and will be installed.", python_path);
+                warn!("[SETUP_VERIFICATION] {}", warning_msg);
+                // Emit a warning status or just log and continue. Let's just log and continue for now,
+                // as the full setup will handle the installation.
+                window.emit("initialization-status", json!({ "status": "progress", "stage": "CheckingPythonPath", "progress": 50, "message": warning_msg })).map_err(|e| e.to_string())?;
             }
         }
         Err(e) => {
-            let error_msg = format!("Failed to determine Python executable path: {}", e);
-            error!("[SETUP_VERIFICATION] {}", error_msg);
-            window.emit("initialization-status", json!({ "status": "error", "message": format!("Initialization failed: {}", error_msg) })).ok();
-            return Err(error_msg);
+            let warning_msg = format!("Failed to determine bundled Python executable path: {}. This is expected on first run and will be installed.", e);
+            warn!("[SETUP_VERIFICATION] {}", warning_msg);
+            // Emit a warning status or just log and continue. Let's just log and continue for now.
+            window.emit("initialization-status", json!({ "status": "progress", "stage": "CheckingPythonPath", "progress": 50, "message": warning_msg })).map_err(|e| e.to_string())?;
         }
     }
     info!("[SETUP_VERIFICATION] Check 2 completed in {:?}", check_2_start.elapsed());
@@ -148,19 +148,19 @@ pub async fn check_initialization_status(window: WebviewWindow) -> Result<(), St
         Ok(comfyui_path) => {
             if comfyui_path.exists() && comfyui_path.is_dir() {
                 info!("[SETUP_VERIFICATION] ComfyUI directory path verified at {:?}", comfyui_path);
-                window.emit("initialization-status", json!({ "status": "progress", "stage": "CheckingComfyUIPath", "progress": 75, "message": "Verifying ComfyUI components..." })).map_err(|e| e.to_string())?;
+                window.emit("initialization-status", json!({ "status": "progress", "stage": "CheckingComfyUIPath", "progress": 75, "message": "ComfyUI directory found." })).map_err(|e| e.to_string())?;
             } else {
-                let error_msg = format!("ComfyUI directory not found or is not a directory at resolved path: {:?}", comfyui_path);
-                error!("[SETUP_VERIFICATION] {}", error_msg);
-                window.emit("initialization-status", json!({ "status": "error", "message": format!("Initialization failed: {}", error_msg) })).ok();
-                return Err(error_msg);
+                let warning_msg = format!("ComfyUI directory not found or is not a directory at resolved path: {:?}. This is expected on first run and will be installed.", comfyui_path);
+                warn!("[SETUP_VERIFICATION] {}", warning_msg);
+                // Emit a warning status or just log and continue. Let's just log and continue for now.
+                window.emit("initialization-status", json!({ "status": "progress", "stage": "CheckingComfyUIPath", "progress": 75, "message": warning_msg })).map_err(|e| e.to_string())?;
             }
         }
         Err(e) => {
-            let error_msg = format!("Failed to determine ComfyUI directory path: {}", e);
-            error!("[SETUP_VERIFICATION] {}", error_msg);
-            window.emit("initialization-status", json!({ "status": "error", "message": format!("Initialization failed: {}", error_msg) })).ok();
-            return Err(error_msg);
+            let warning_msg = format!("Failed to determine ComfyUI directory path: {}. This is expected on first run and will be installed.", e);
+            warn!("[SETUP_VERIFICATION] {}", warning_msg);
+            // Emit a warning status or just log and continue. Let's just log and continue for now.
+            window.emit("initialization-status", json!({ "status": "progress", "stage": "CheckingComfyUIPath", "progress": 75, "message": warning_msg })).map_err(|e| e.to_string())?;
         }
     }
     info!("[SETUP_VERIFICATION] Check 3 completed in {:?}", check_3_start.elapsed());
@@ -195,45 +195,61 @@ pub async fn run_quick_verification(app_handle: &AppHandle<Wry>) -> Result<bool,
     info!("[QUICK VERIFY] Starting quick verification process...");
 
     let comfyui_dir = get_comfyui_directory_path(app_handle)?;
-    let venv_python_executable = get_venv_python_executable_path(app_handle)?;
+    let _venv_python_executable = get_venv_python_executable_path(app_handle)?;
     // venv_dir can be derived if needed: venv_python_executable.parent().unwrap().parent().unwrap()
     // For the check, we primarily need comfyui_dir and venv_python_executable.
     // Let's get venv_dir explicitly for the check.
-    let venv_dir = comfyui_dir.join(".venv");
+    let _venv_dir = comfyui_dir.join(".venv");
 
 
-    // 1. Venv Integrity: Check .venv directory
-    if !venv_dir.exists() || !venv_dir.is_dir() {
-        info!("[QUICK VERIFY] FAILED: .venv directory not found at {}", venv_dir.display());
+    // Quick verification should only check for the presence of core files/directories placed by the build script.
+    // The .venv and its contents are created during the full setup, so they should not be checked here.
+
+    // 1. Check for vendor/python directory
+    let python_dir = get_bundled_python_executable_path(app_handle)?.parent().ok_or("Failed to get parent of python executable")?.to_path_buf();
+    info!("[QUICK VERIFY] Checking for vendor/python directory at {}", python_dir.display());
+    if !python_dir.exists() || !python_dir.is_dir() {
+        info!("[QUICK VERIFY] FAILED: vendor/python directory not found at {}", python_dir.display());
         return Ok(false);
     }
-    info!("[QUICK VERIFY] PASSED: .venv directory exists at {}", venv_dir.display());
+    info!("[QUICK VERIFY] PASSED: vendor/python directory found.");
 
-    // 2. Venv Integrity: Check Python executable within .venv
-    if !venv_python_executable.exists() || !venv_python_executable.is_file() {
-        info!("[QUICK VERIFY] FAILED: Python executable not found in .venv at {}", venv_python_executable.display());
+    // 2. Check for vendor/python/python.exe (or equivalent)
+    let python_executable = get_bundled_python_executable_path(app_handle)?;
+    info!("[QUICK VERIFY] Checking for Python executable at {}", python_executable.display());
+    if !python_executable.exists() || !python_executable.is_file() {
+        info!("[QUICK VERIFY] FAILED: Python executable not found at {}", python_executable.display());
         return Ok(false);
     }
-    info!("[QUICK VERIFY] PASSED: Python executable exists in .venv at {}", venv_python_executable.display());
+    info!("[QUICK VERIFY] PASSED: Python executable exists.");
 
-    // 3. Critical File Existence: Check for vendor/comfyui/main.py
+    // 3. Check for vendor/comfyui directory
+    let comfyui_dir = get_comfyui_directory_path(app_handle)?;
+    info!("[QUICK VERIFY] Checking for vendor/comfyui directory at {}", comfyui_dir.display());
+    if !comfyui_dir.exists() || !comfyui_dir.is_dir() {
+        info!("[QUICK VERIFY] FAILED: vendor/comfyui directory not found at {}", comfyui_dir.display());
+        return Ok(false);
+    }
+    info!("[QUICK VERIFY] PASSED: vendor/comfyui directory found.");
+
+    // 4. Check for vendor/comfyui/main.py
     let main_py_path = comfyui_dir.join("main.py");
+    info!("[QUICK VERIFY] Checking for main.py at {}", main_py_path.display());
     if !main_py_path.exists() || !main_py_path.is_file() {
         info!("[QUICK VERIFY] FAILED: main.py not found at {}", main_py_path.display());
         return Ok(false);
     }
-    info!("[QUICK VERIFY] PASSED: main.py exists at {}", main_py_path.display());
-    
-    // 4. (Optional) ComfyUI Basic Health - can be added later if needed.
+    info!("[QUICK VERIFY] PASSED: main.py exists.");
+
     // ComfyUI sidecar start and health check will be handled by a subsequent command
     // after SplashScreen receives BackendFullyVerifiedAndReady.
-    info!("[QUICK VERIFY] File-based verification checks passed. Sidecar start deferred.");
-    info!("[QUICK VERIFY] All quick file verification checks passed.");
+    info!("[QUICK VERIFY] All essential file existence checks passed.");
     Ok(true)
 }
 
 // Verification step names (for event payloads and logging)
 const VERIFICATION_EVENT_IPADAPTER_DIR: &str = "Verifying IPAdapter Plus directory";
+const VERIFICATION_EVENT_PYTHON_ENV: &str = "Verifying Python environment integrity";
 // const VERIFICATION_EVENT_ONNXRUNTIME_IMPORT: &str = "Verifying onnxruntime import"; // Unused
 // const VERIFICATION_EVENT_INSIGHTFACE_IMPORT: &str = "Verifying insightface import"; // Unused
 
@@ -266,7 +282,6 @@ pub async fn check_ipadapter_plus_directory_exists(
     }
 }
 
-// Local get_script_path removed, will use get_util_script_path from python_utils.
 
 /// Checks if a Python package can be imported by running a specific script in the ComfyUI venv.
 pub async fn check_python_package_import(
@@ -367,5 +382,151 @@ pub async fn check_python_package_import(
         error!("[VERIFY] FAILED: {} - {}", step_name, err_msg);
         app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name.clone(), "error": err_msg.clone(), "details": stderr_str })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_FAILED, e))?;
         Err(err_msg)
+    }
+}
+
+/// Checks the integrity of the Python virtual environment and verifies key package imports.
+/// This is a more thorough check than the quick file-based verification.
+pub async fn check_python_environment_integrity(app_handle: &AppHandle<Wry>) -> Result<bool, String> {
+    let step_name = VERIFICATION_EVENT_PYTHON_ENV;
+    info!("[VERIFY] Starting: {}", step_name);
+    app_handle.emit(EVT_VERIFICATION_STEP_START, json!({ "stepName": step_name })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_START, e))?;
+
+    let comfyui_dir_result = get_comfyui_directory_path(app_handle);
+    let comfyui_dir = match comfyui_dir_result {
+        Ok(path) => path,
+        Err(e) => {
+            let err_msg = format!("Failed to get ComfyUI directory path: {}", e);
+            warn!("[VERIFY] FAILED (pre-check): {} - {}", step_name, err_msg);
+            app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name, "error": err_msg.clone(), "details": null })).map_err(|emit_err| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_FAILED, emit_err))?;
+            return Ok(false); // Indicate verification failed, but not a critical error
+        }
+    };
+
+    let venv_python_executable_result = get_venv_python_executable_path(app_handle);
+    let venv_python_executable = match venv_python_executable_result {
+        Ok(path) => path,
+        Err(e) => {
+            let err_msg = format!("Failed to get venv Python executable path: {}", e);
+            warn!("[VERIFY] FAILED (pre-check): {} - {}", step_name, err_msg);
+            app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name, "error": err_msg.clone(), "details": null })).map_err(|emit_err| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_FAILED, emit_err))?;
+            return Ok(false); // Indicate verification failed, but not a critical error
+        }
+    };
+
+    let venv_dir = comfyui_dir.join(".venv");
+
+    // 1. Check if .venv directory exists and is a directory
+    info!("[VERIFY] Checking for .venv directory at {}", venv_dir.display());
+    if !venv_dir.exists() || !venv_dir.is_dir() {
+        let err_msg = format!(".venv directory not found or is not a directory at {}", venv_dir.display());
+        warn!("[VERIFY] FAILED: {} - {}", step_name, err_msg);
+        app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name, "error": err_msg.clone(), "details": null })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_FAILED, e))?;
+        return Ok(false);
+    }
+    info!("[VERIFY] PASSED: .venv directory found.");
+
+    // 2. Check if Python executable exists within .venv
+    info!("[VERIFY] Checking for Python executable in .venv at {}", venv_python_executable.display());
+    if !venv_python_executable.exists() || !venv_python_executable.is_file() {
+        let err_msg = format!("Python executable not found in .venv at {}", venv_python_executable.display());
+        warn!("[VERIFY] FAILED: {} - {}", step_name, err_msg);
+        app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name, "error": err_msg.clone(), "details": null })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_FAILED, e))?;
+        return Ok(false);
+    }
+    info!("[VERIFY] PASSED: Python executable exists in .venv.");
+
+    // 3. Verify key package imports (e.g., torch, torchvision, numpy, etc.)
+    // This requires running a Python script within the venv.
+    // We can reuse the check_python_package_import function.
+    let packages_to_verify = vec!["torch", "torchvision", "numpy", "requests", "Pillow"]; // Add other critical packages
+    let mut all_packages_ok = true;
+    let mut failed_packages = Vec::new();
+
+    for package in packages_to_verify {
+        let script_name = format!("script_check_{}.py", package.replace("-", "_")); // e.g., script_check_torch.py
+        // Create a temporary script file to check import
+        let script_content = format!("import {}\nprint('{} import successful')", package, package);
+        let temp_script_path = comfyui_dir.join(&script_name); // Place temp script in comfyui dir
+
+        if let Err(e) = tokio::fs::write(&temp_script_path, script_content).await {
+            let err_msg = format!("Failed to write temporary verification script {}: {}", script_name, e);
+            error!("[VERIFY] {}", err_msg);
+            // This is a critical error, but we'll continue checking other packages for now.
+            all_packages_ok = false;
+            failed_packages.push(format!("Script write failed for {}: {}", package, e));
+            continue; // Skip to next package
+        }
+
+        match check_python_package_import(app_handle, package, &script_name, &venv_python_executable, &comfyui_dir).await {
+            Ok(_) => {
+                info!("[VERIFY] PASSED: {} import successful.", package);
+            }
+            Err(e) => {
+                let err_msg = format!("Failed to verify {} import: {}", package, e);
+                warn!("[VERIFY] FAILED: {} - {}", step_name, err_msg);
+                all_packages_ok = false;
+                failed_packages.push(err_msg);
+            }
+        }
+
+        // Clean up the temporary script file
+        if let Err(e) = tokio::fs::remove_file(&temp_script_path).await {
+            warn!("[VERIFY] Failed to remove temporary verification script {}: {}", script_name, e);
+        }
+    }
+
+    if all_packages_ok {
+        info!("[VERIFY] SUCCESS: All key Python packages imported successfully. Python environment integrity check passed.");
+        app_handle.emit(EVT_VERIFICATION_STEP_SUCCESS, json!({ "stepName": step_name, "details": "All key packages imported successfully." })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_SUCCESS, e))?;
+        Ok(true)
+    } else {
+        let err_msg = format!("Python environment integrity check failed. Failed packages: {}", failed_packages.join(", "));
+        warn!("[VERIFY] FAILED: {}", err_msg);
+        app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name, "error": err_msg.clone(), "details": failed_packages.join("\n") })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_FAILED, e))?;
+        Ok(false)
+    }
+}
+
+/// Checks if all core model files exist in the ComfyUI models directory.
+pub async fn check_core_models_exist(app_handle: &AppHandle<Wry>) -> Result<bool, String> {
+    let step_name = "Verifying core models existence";
+    info!("[VERIFY] Starting: {}", step_name);
+    app_handle.emit(EVT_VERIFICATION_STEP_START, json!({ "stepName": step_name })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_START, e))?;
+
+    let comfyui_dir = get_comfyui_directory_path(app_handle)?;
+    let comfyui_models_base_path = comfyui_dir.join("models");
+    let core_models = crate::setup_manager::get_core_models_list(); // Use the function from setup_manager
+
+    if core_models.is_empty() {
+        info!("[VERIFY] No core models configured. Skipping check.");
+        app_handle.emit(EVT_VERIFICATION_STEP_SUCCESS, json!({ "stepName": step_name, "details": "No core models configured." })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_SUCCESS, e))?;
+        return Ok(true); // No models to check means they "exist" in a sense
+    }
+
+    let mut all_models_exist = true;
+    let mut missing_models = Vec::new();
+
+    for model in core_models {
+        let model_path = comfyui_models_base_path.join(&model.target_filename);
+        info!("[VERIFY] Checking for model file: {}", model_path.display());
+        if !model_path.exists() || !model_path.is_file() {
+            warn!("[VERIFY] MISSING: Model file not found at {}", model_path.display());
+            all_models_exist = false;
+            missing_models.push(model.target_filename.clone());
+        } else {
+            info!("[VERIFY] FOUND: Model file exists at {}", model_path.display());
+        }
+    }
+
+    if all_models_exist {
+        info!("[VERIFY] SUCCESS: All core model files found. Core models existence check passed.");
+        app_handle.emit(EVT_VERIFICATION_STEP_SUCCESS, json!({ "stepName": step_name, "details": "All core model files found." })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_SUCCESS, e))?;
+        Ok(true)
+    } else {
+        let err_msg = format!("Core model files missing: {}", missing_models.join(", "));
+        warn!("[VERIFY] FAILED: {}", err_msg);
+        app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name, "error": err_msg.clone(), "details": missing_models.join("\n") })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_FAILED, e))?;
+        Ok(false)
     }
 }

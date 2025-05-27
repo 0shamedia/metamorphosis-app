@@ -177,28 +177,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     
     // Attempt to remove the destination directory before copying to avoid permission/lock issues
-    println!("Attempting to clean destination vendor directory: {:?}", &dest_vendor_path);
-    eprintln!("cargo:warning=BUILD_RS_STAGE: Attempting to clean destination vendor directory: {:?}", &dest_vendor_path);
-    if dest_vendor_path.exists() {
-        match fs::remove_dir_all(&dest_vendor_path) {
-            Ok(_) => {
-                println!("Successfully cleaned destination vendor directory.");
-                eprintln!("cargo:warning=BUILD_RS_INFO: Successfully cleaned destination vendor directory.");
-            }
-            Err(e) => {
-                eprintln!("Warning: Failed to clean destination vendor directory: {}. Proceeding with copy, but this might cause issues.", e);
-                eprintln!("cargo:warning=BUILD_RS_WARN: Failed to clean destination vendor directory: {}. Proceeding with copy.", e);
-            }
-        }
-    } else {
-        eprintln!("cargo:warning=BUILD_RS_INFO: Destination vendor directory does not exist, no need to clean.");
-    }
 
 
     println!("Source vendor path (absolute): {:?}", &absolute_vendor_path);
     eprintln!("cargo:warning=BUILD_RS_DEBUG: Source vendor path (absolute): {:?}", &absolute_vendor_path);
     println!("Destination vendor path (absolute): {:?}", &dest_vendor_path);
     eprintln!("cargo:warning=BUILD_RS_DEBUG: Destination vendor path (absolute): {:?}", &dest_vendor_path);
+
+    // --- Diagnostic: Check if source vendor/comfyui exists ---
+    let source_comfyui_path_check = absolute_vendor_path.join("comfyui");
+    eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Checking if source vendor/comfyui exists: {:?}", &source_comfyui_path_check);
+    if source_comfyui_path_check.exists() {
+        eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Source vendor/comfyui FOUND.");
+    } else {
+        eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Source vendor/comfyui NOT FOUND.");
+    }
+    // --- End Diagnostic ---
 
     // --- Diagnostic: List Source Vendor Contents ---
     std::thread::sleep(std::time::Duration::from_secs(1)); // Add delay after manual cleanup
@@ -242,17 +236,82 @@ fn main() -> Result<(), Box<dyn Error>> {
     options.overwrite = true; // Overwrite existing files
     options.copy_inside = true; // Copy the contents of the source directory, not the directory itself
 
+    eprintln!("cargo:warning=BUILD_RS_STAGE: Attempting fs_extra::dir::copy from {:?} to {:?}", &absolute_vendor_path, &dest_vendor_path);
     match copy(&absolute_vendor_path, &dest_vendor_path, &options) {
         Ok(_) => eprintln!("cargo:warning=BUILD_RS_INFO: Vendor directory copy reported successful by fs_extra::dir::copy."),
         Err(e) => {
             eprintln!("cargo:warning=BUILD_RS_ERROR: Vendor directory copy FAILED with error: {}", e);
-            // Decide if we should return Err(e.into()) here or let it proceed to verification.
-            // For now, let it proceed to see if verification also fails.
+            return Err(Box::new(e)); // Make this error fatal to the build script
         }
     }
     eprintln!("cargo:warning=BUILD_RS_INFO: Vendor directory copy attempt finished (check success/failure above).");
+
+    // --- Verification after copy ---
+    let check_comfyui_dir_dest = dest_vendor_path.join("comfyui");
+    println!("cargo:warning=BUILD_RS_VERIFY_DIR: Checking for existence of copied directory: {:?}", check_comfyui_dir_dest);
+    if !check_comfyui_dir_dest.is_dir() { // Check if it's a directory
+        let source_comfyui_dir = absolute_vendor_path.join("comfyui");
+        panic!(
+            "CRITICAL BUILD ERROR: comfyui directory was NOT copied (or is not a dir) to target vendor directory.\n\
+             Checked path: {:?}\n\
+             Source path: {:?}\n\
+             Absolute vendor source: {:?}\n\
+             Destination vendor target: {:?}",
+            check_comfyui_dir_dest,
+            source_comfyui_dir,
+            absolute_vendor_path,
+            dest_vendor_path
+        );
+    } else {
+        println!("cargo:warning=BUILD_RS_VERIFY_DIR_SUCCESS: comfyui directory WAS successfully copied and is a directory at {:?}", check_comfyui_dir_dest);
+        // Further check for main.py inside it
+        let check_main_py = check_comfyui_dir_dest.join("main.py");
+        if !check_main_py.exists() {
+            panic!("CRITICAL BUILD ERROR: comfyui/main.py exists in source but NOT in target vendor directory after copy. Target main.py path: {:?}", check_main_py);
+        } else {
+            println!("cargo:warning=BUILD_RS_VERIFY_MAIN_PY_SUCCESS: comfyui/main.py also exists in target: {:?}", check_main_py);
+        }
+    }
+    // --- End Verification ---
     
-    eprintln!("cargo:warning=BUILD_RS_TEST: Reached verification section after copy attempt.");
+    // --- Explicitly copy ComfyUI directory --- (SECTION COMMENTED OUT)
+    // This section is suspected to be redundant or causing incorrect nesting (e.g., comfyui/comfyui)
+    // The copy operation on line 256 with `options.copy_inside = true;` should handle copying
+    // the contents of `absolute_vendor_path` (which includes `comfyui`) into `dest_vendor_path`.
+    /*
+    let source_comfyui_path_explicit = absolute_vendor_path.join("comfyui");
+    let dest_comfyui_path_explicit = dest_vendor_path.join("comfyui");
+    eprintln!("cargo:warning=BUILD_RS_STAGE: Attempting explicit fs_extra::dir::copy for ComfyUI from {:?} to {:?}", &source_comfyui_path_explicit, &dest_comfyui_path_explicit);
+    
+    // Ensure destination parent exists (dest_vendor_path already created)
+    if let Some(parent_dir) = dest_comfyui_path_explicit.parent() {
+        if !parent_dir.exists() {
+             eprintln!("cargo:warning=BUILD_RS_WARN: Parent directory for explicit ComfyUI copy did not exist: {:?}", parent_dir);
+             // This shouldn't happen if dest_vendor_path was created, but good defensive check
+             if let Err(e) = fs::create_dir_all(parent_dir) {
+                 let err_msg = format!("Failed to create parent directory for explicit ComfyUI copy {:?}: {}", parent_dir, e);
+                 eprintln!("cargo:warning=BUILD_RS_ERROR: {}", err_msg);
+                 return Err(err_msg.into());
+             }
+             eprintln!("cargo:warning=BUILD_RS_INFO: Parent directory for explicit ComfyUI copy created.");
+        }
+    }
+
+    let mut options_explicit = CopyOptions::new();
+    options_explicit.overwrite = true; // Overwrite existing files
+    options_explicit.copy_inside = false; // Copy the directory itself and its contents
+
+    match copy(&source_comfyui_path_explicit, &dest_comfyui_path_explicit, &options_explicit) {
+        Ok(_) => eprintln!("cargo:warning=BUILD_RS_INFO: Explicit ComfyUI directory copy reported successful by fs_extra::dir::copy."),
+        Err(e) => {
+            eprintln!("cargo:warning=BUILD_RS_ERROR: Explicit ComfyUI directory copy FAILED with error: {}", e);
+            // This is likely a critical error, so we should probably return Err here.
+            return Err(e.into());
+        }
+    }
+    eprintln!("cargo:warning=BUILD_RS_INFO: Explicit ComfyUI directory copy attempt finished (check success/failure above).");
+    */
+    eprintln!("cargo:warning=BUILD_RS_TEST: Reached verification section after copy attempt (explicit ComfyUI copy section commented out).");
 
     // --- Verify requirements.txt exists after copy ---
     let requirements_dest_path = dest_vendor_path.join("comfyui/requirements.txt");

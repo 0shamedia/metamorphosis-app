@@ -1,3 +1,5 @@
+const defaultTheme = require('tailwindcss/defaultTheme'); // Import defaultTheme
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
@@ -5,6 +7,17 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        // The 'sans' key can be left to default or just include fallbacks if
+        // quicksand.className on body is the primary method of applying the font.
+        // For robustness, ensuring Quicksand is first if 'font-sans' is used anywhere explicitly:
+        sans: ['Quicksand', ...defaultTheme.fontFamily.sans],
+        // If quicksand.className is on <body>, this might not even be strictly necessary
+        // unless you use `font-sans` utility class explicitly on some elements
+        // and want to ensure Quicksand is the primary font for that utility.
+        // Or, if you want to define a custom font name:
+        // quicksand: ['Quicksand', ...defaultTheme.fontFamily.sans],
+      },
       colors: {
         purple: {
           50: '#f5f3ff',

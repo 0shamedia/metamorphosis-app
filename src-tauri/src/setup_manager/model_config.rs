@@ -49,13 +49,40 @@ pub fn get_core_models_list() -> Vec<ModelConfig> {
             expected_size_bytes: Some(334_641_164),
         },
         ModelConfig {
-            id: "cyberrealistic_pony_catalyst_v1_1".to_string(),
-            name: "CyberRealisticPony Catalyst V1.1".to_string(),
-            url: "https://huggingface.co/cyberdelia/CyberRealisticPony/resolve/main/CyberRealisticPonyCatalyst_V1.1.safetensors".to_string(),
+            id: "nova_3dcg_xl_illustrious_v30_sdxl".to_string(), // Updated ID
+            name: "Nova 3DCG XL Illustrious V3.0 SDXL".to_string(), // Updated name
+            url: "https://store-na-phx-1.gofile.io/download/direct/0cf3cfd8-86ea-4b64-a1af-2136d8b57865/nova3DCGXL_illustriousV30.safetensors".to_string(), // New GoFile URL
             target_subdir: "checkpoints".to_string(),
-            target_filename: "CyberRealisticPonyCatalyst_V1.1.safetensors".to_string(),
+            target_filename: "nova3DCGXL_illustriousV30.safetensors".to_string(), // New filename
+            downloaded_filename: Some("nova3DCGXL_illustriousV30.safetensors".to_string()), // Explicitly set downloaded filename
+            expected_size_bytes: Some(6_938_372_138), // Updated to actual downloaded size from GoFile
+        },
+        ModelConfig {
+            id: "sam_vit_b_01ec64".to_string(),
+            name: "SAM ViT-B".to_string(),
+            url: "https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/sams/sam_vit_b_01ec64.pth".to_string(),
+            target_subdir: "sams".to_string(),
+            target_filename: "sam_vit_b_01ec64.pth".to_string(),
             downloaded_filename: None,
-            expected_size_bytes: Some(6_938_040_682),
+            expected_size_bytes: Some(375_042_383),
+        },
+        ModelConfig {
+            id: "face_yolov8m".to_string(),
+            name: "Face YOLOv8m".to_string(),
+            url: "https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/detection/bbox/face_yolov8m.pt".to_string(),
+            target_subdir: "ultralytics/bbox".to_string(),
+            target_filename: "face_yolov8m.pt".to_string(),
+            downloaded_filename: None,
+            expected_size_bytes: Some(51_996_128),
+        },
+        ModelConfig {
+            id: "hand_yolov8s".to_string(),
+            name: "Hand YOLOv8s".to_string(),
+            url: "https://huggingface.co/Bingsu/adetailer/resolve/main/hand_yolov8s.pt".to_string(),
+            target_subdir: "ultralytics/bbox".to_string(),
+            target_filename: "hand_yolov8s.pt".to_string(),
+            downloaded_filename: None,
+            expected_size_bytes: Some(22_507_643),
         },
     ]
 }

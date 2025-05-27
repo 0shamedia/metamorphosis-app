@@ -106,33 +106,33 @@ const SetupModelDownloader: React.FC = () => {
         </div>
       )}
       <ul className="model-list">
-        {Object.values(modelStatuses).map((model) => (
-          <li key={model.name} className={`model-item model-status-${model.status}`}>
-            <h4>{model.name}</h4>
-            {model.status === 'downloading' && model.progress !== undefined && (
+        {Object.entries(modelStatuses).map(([modelId, modelData]) => (
+          <li key={modelId} className={`model-item model-status-${modelData.status}`}>
+            <h4>{modelData.name}</h4>
+            {modelData.status === 'downloading' && modelData.progress !== undefined && (
               <div>
-                <progress value={model.progress} max="100" />
-                <span>{model.progress?.toFixed(2)}%</span>
-                {model.downloadedBytes !== undefined && model.totalBytes !== undefined && model.totalBytes !== null && (
+                <progress value={modelData.progress} max="100" />
+                <span>{modelData.progress?.toFixed(2)}%</span>
+                {modelData.downloadedBytes !== undefined && modelData.totalBytes !== undefined && modelData.totalBytes !== null && (
                   <span>
-                    {' '}({(model.downloadedBytes / (1024 * 1024))?.toFixed(2)} MB / {(model.totalBytes / (1024 * 1024))?.toFixed(2)} MB)
+                    {' '}({(modelData.downloadedBytes / (1024 * 1024))?.toFixed(2)} MB / {(modelData.totalBytes / (1024 * 1024))?.toFixed(2)} MB)
                   </span>
                 )}
-                 {model.downloadedBytes !== undefined && model.totalBytes === null && (
+                 {modelData.downloadedBytes !== undefined && modelData.totalBytes === null && (
                   <span>
-                    {' '}({(model.downloadedBytes / (1024 * 1024))?.toFixed(2)} MB downloaded)
+                    {' '}({(modelData.downloadedBytes / (1024 * 1024))?.toFixed(2)} MB downloaded)
                   </span>
                 )}
               </div>
             )}
-            {model.status === 'completed' && (
+            {modelData.status === 'completed' && (
               <p className="status-message">
-                Download complete! (Took: {model.durationSeconds?.toFixed(1)}s)
+                Download complete! (Took: {modelData.durationSeconds?.toFixed(1)}s)
               </p>
             )}
-            {model.status === 'failed' && (
+            {modelData.status === 'failed' && (
               <p className="status-message error-message">
-                Download failed: {model.error}
+                Download failed: {modelData.error}
               </p>
             )}
           </li>

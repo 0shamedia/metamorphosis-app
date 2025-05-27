@@ -1,7 +1,7 @@
 {
   "1": {
     "inputs": {
-      "ckpt_name": "toonify_Illustrious.safetensors"
+      "ckpt_name": "nova3DCGXL_illustriousV30.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
@@ -10,7 +10,7 @@
   },
   "2": {
     "inputs": {
-      "text": "realistic, best quality, full body, 1girl, adult, clothed, looking at viewer, plain background,",
+      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, scenery, 3d, rendered, rim light, backlit, dramatic shadow, {INSERT PROMPT HERE}, BREAK, dramatic shadow, vignetting, volumetric lighting, incredibly detailed skin,",
       "clip": [
         "1",
         1
@@ -23,7 +23,7 @@
   },
   "3": {
     "inputs": {
-      "text": "(blurry), (lowres:1.2), (worst quality:1.4), (low quality:1.4), (bad anatomy:1.4), bad eyes, multiple views, jpeg artifacts, signature, watermark, text, logo, artist name, child, loli",
+      "text": "modern, recent, old, oldest, cartoon, anime, graphic, text, painting, crayon, graphite, abstract, glitch, deformed, mutated, ugly, disfigured, long body, lowres, bad anatomy, bad hands, missing fingers, extra digits, fewer digits, cropped, very displeasing, (worst quality, bad quality:1.2), bad anatomy, sketch, jpeg artifacts, signature, watermark, username, conjoined, bad ai-generated, shine, shiny, porcelain skin,",
       "clip": [
         "1",
         1
@@ -36,8 +36,8 @@
   },
   "4": {
     "inputs": {
-      "width": 1024,
-      "height": 1024,
+      "width": 776,
+      "height": 1344,
       "batch_size": 1
     },
     "class_type": "EmptyLatentImage",

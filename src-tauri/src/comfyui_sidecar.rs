@@ -17,11 +17,7 @@
 // };
 
 // Public functions are re-exported.
-pub use crate::sidecar_manager::orchestration::{
-    spawn_and_health_check_comfyui,
-};
 pub use crate::sidecar_manager::process_handler::{
-    is_comfyui_process_active,
     stop_comfyui_sidecar,
 };
 

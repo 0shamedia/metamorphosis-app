@@ -26,3 +26,10 @@ export interface Tag {
   description: string;
   category?: TagCategory; // Optional based on UI plan, but good to include for categorization
 }
+
+// Interface for generated image options
+export interface ImageOption {
+  id: string;
+  url: string;
+  alt: string;
+}

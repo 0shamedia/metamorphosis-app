@@ -7,11 +7,13 @@ import { useEffect } from 'react'; // Removed useState as it's not used directly
 export default function SplashPage() {
   const router = useRouter();
 
-  const handleSplashComplete = () => {
-    console.log('[SplashPage] Splash complete, navigating to /setup');
-    // In a real scenario, you might check if setup is needed.
-    // For now, always navigate to /setup as per docs/ui/setup_flow.md
-    router.push('/setup');
+  const handleSplashComplete = (destination: 'setup' | 'title') => {
+    console.log(`[SplashPage] Splash complete, navigating to ${destination}`);
+    if (destination === 'setup') {
+      router.push('/setup');
+    } else if (destination === 'title') {
+      router.push('/title');
+    }
   };
 
   // useEffect can be used here if SplashPage itself needs to react to

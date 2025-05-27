@@ -14,11 +14,11 @@ use std::env; // Added for env! macro
 // In debug mode, we construct a path relative to the manifest dir to point to `target/debug/`.
 fn get_base_resource_path(app_handle: &AppHandle<Wry>) -> Result<PathBuf, String> {
     if cfg!(debug_assertions) {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .ok_or_else(|| "Failed to get parent of CARGO_MANIFEST_DIR".to_string())?
-            .join("target")
-            .join("debug")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")) // Should be .../src-tauri
+            .parent()                             // Should be .../metamorphosis-app
+            .ok_or_else(|| "Failed to get parent of CARGO_MANIFEST_DIR for debug base path".to_string())?
+            .join("target")                       // .../metamorphosis-app/target
+            .join("debug")                        // .../metamorphosis-app/target/debug
             .canonicalize()
             .map_err(|e| format!("Failed to canonicalize debug base resource path: {}", e))
     } else {
@@ -30,6 +30,8 @@ fn get_base_resource_path(app_handle: &AppHandle<Wry>) -> Result<PathBuf, String
 
 /// Returns the absolute path to the 'vendor' directory.
 pub fn get_vendor_path(app_handle: &AppHandle<Wry>) -> Result<PathBuf, String> {
+    // get_base_resource_path handles debug vs release logic for the base.
+    // build.rs copies vendor to metamorphosis-app/target/[debug|release]/vendor
     get_base_resource_path(app_handle)?
         .join("vendor")
         .canonicalize()

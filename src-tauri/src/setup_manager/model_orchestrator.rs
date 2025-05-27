@@ -8,7 +8,7 @@ use tokio::time::sleep;
 
 use super::model_config::ModelConfig; // Import ModelConfig
 use super::model_events::{
-    OverallModelDownloadProgress,
+    OverallModelDownloadProgressInternal, // Changed from OverallModelDownloadProgress
     emit_overall_model_download_progress,
 }; // Import event payloads and emitters
 use super::model_utils::get_final_model_path; // Import get_final_model_path
@@ -28,7 +28,7 @@ pub async fn download_and_place_models(
         return Ok(());
     }
 
-    let mut overall_progress_payload = OverallModelDownloadProgress {
+    let mut overall_progress_payload = OverallModelDownloadProgressInternal { // Changed struct name
         current_model_index: 0,
         total_models,
         current_model_id: "".to_string(),
@@ -47,14 +47,23 @@ pub async fn download_and_place_models(
         // This ensures the UI shows which model is *about* to be downloaded
         overall_progress_payload.overall_progress_percentage = (index as f32 / total_models as f32) * 100.0;
         emit_overall_model_download_progress(&app_handle, overall_progress_payload.clone());
-
+        // Also emit setup-progress for the main progress bar
+        crate::setup::emit_setup_progress(
+            &app_handle,
+            "downloading_models",
+            &format!("Downloading model {} of {}: {}", index + 1, total_models, model_config.name),
+            overall_progress_payload.overall_progress_percentage.round() as u8, // Use overall percentage for phase progress
+            Some(format!("Starting download for {}", model_config.name)),
+            None,
+        );
+ 
         let target_file_path = get_final_model_path(comfyui_models_base_path, model_config)?;
         debug!("Determined target path for {}: {}", model_config.name, target_file_path.display());
-
+ 
         let max_retries = 3;
         let mut attempt = 0;
         let mut last_error_message: Option<String> = None;
-
+ 
         while attempt < max_retries {
             attempt += 1;
             if attempt > 1 {
@@ -69,20 +78,38 @@ pub async fn download_and_place_models(
                 // Ensure overall_progress_percentage reflects the start of this model, not completion of previous
                 overall_progress_payload.overall_progress_percentage = (index as f32 / total_models as f32) * 100.0;
                 emit_overall_model_download_progress(&app_handle, overall_progress_payload.clone());
-
+                // Also emit setup-progress for the main progress bar during retry
+                 crate::setup::emit_setup_progress(
+                    &app_handle,
+                    "downloading_models",
+                    &format!("Retrying download for model {} of {}: {}", index + 1, total_models, model_config.name),
+                    overall_progress_payload.overall_progress_percentage.round() as u8, // Use overall percentage for phase progress
+                    Some(format!("Attempt {}/{} failed. Retrying in {}s...", attempt - 1, max_retries, backoff_duration_secs)),
+                    last_error_message.clone(), // Include the last error message
+                );
+ 
                 debug!("Starting backoff for {}s for model {}", backoff_duration_secs, model_config.name);
                 sleep(Duration::from_secs(backoff_duration_secs)).await; // Exponential backoff with a cap
                 debug!("Backoff finished for model {}", model_config.name);
             } else {
                 info!("Starting download for model {} (attempt {}/{})", model_config.name, attempt, max_retries);
             }
-
+ 
             match download_single_model(&app_handle, model_config, &target_file_path, &mut overall_progress_payload, attempt, max_retries).await {
                 Ok(_) => {
                     info!("Successfully processed model: {}", model_config.name);
                     // overall_progress_payload.current_model_progress_percentage is set to 100.0 by download_single_model on success
                     overall_progress_payload.overall_progress_percentage = ((index + 1) as f32 / total_models as f32) * 100.0;
                     emit_overall_model_download_progress(&app_handle, overall_progress_payload.clone());
+                     // Also emit setup-progress for the main progress bar on success
+                     crate::setup::emit_setup_progress(
+                        &app_handle,
+                        "downloading_models",
+                        &format!("Model {} of {} downloaded: {}", index + 1, total_models, model_config.name),
+                        overall_progress_payload.overall_progress_percentage.round() as u8, // Use overall percentage for phase progress
+                        Some(format!("Successfully downloaded {}", model_config.name)),
+                        None,
+                    );
                     last_error_message = None; // Clear error on success
                     break; // Exit retry loop
                 }
@@ -90,17 +117,27 @@ pub async fn download_and_place_models(
                     error!("Attempt {}/{} failed for model {}: {}", attempt, max_retries, model_config.name, e);
                     last_error_message = Some(e.clone());
                     // ModelDownloadFailed event is emitted by download_single_model itself.
+                    // We will emit a setup-progress error if all retries fail.
                 }
             }
         }
-
+ 
         if let Some(err_msg) = last_error_message {
             error!("All {} attempts failed for model {}. Last error: {}", max_retries, model_config.name, err_msg);
             // The specific model download failure event was already emitted by the last call to download_single_model.
+            // Emit a final setup-progress error for this model
+            crate::setup::emit_setup_progress(
+                &app_handle,
+                "error", // Transition to error phase
+                &format!("Model Download Failed: {}", model_config.name),
+                overall_progress_payload.overall_progress_percentage.round() as u8, // Use last known overall percentage
+                Some(format!("Failed to download model {} after {} attempts.", model_config.name, max_retries)),
+                Some(err_msg.clone()), // Include the last error message
+            );
             return Err(format!("Failed to download model {} after {} attempts: {}", model_config.name, max_retries, err_msg));
         }
     }
-
+ 
     info!("All models processed successfully.");
     if !models_to_download.is_empty() {
         // Ensure the UI shows 100% completion for the last model and overall.
@@ -111,8 +148,17 @@ pub async fn download_and_place_models(
         }
         overall_progress_payload.current_model_progress_percentage = 100.0;
         overall_progress_payload.overall_progress_percentage = 100.0;
-        emit_overall_model_download_progress(&app_handle, overall_progress_payload);
+        emit_overall_model_download_progress(&app_handle, overall_progress_payload.clone());
+         // Also emit final setup-progress for the main progress bar
+         crate::setup::emit_setup_progress(
+            &app_handle,
+            "downloading_models",
+            "All core models downloaded successfully.",
+            100, // Ensure 100% progress for the phase
+            None,
+            None,
+        );
     }
-
+ 
     Ok(())
 }

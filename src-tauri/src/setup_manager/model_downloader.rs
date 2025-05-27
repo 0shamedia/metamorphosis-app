@@ -14,7 +14,7 @@ use super::model_events::{
     ModelDownloadProgressPayload,
     ModelDownloadCompletePayload,
     ModelDownloadFailedPayload,
-    OverallModelDownloadProgress,
+    OverallModelDownloadProgressInternal, // Changed from OverallModelDownloadProgress
     emit_model_download_progress,
     emit_model_download_complete,
     emit_model_download_failed,
@@ -24,7 +24,7 @@ pub async fn download_single_model(
     app_handle: &AppHandle<Wry>,
     model_config: &ModelConfig,
     target_file_path: &Path, // This is the final destination path
-    overall_progress_payload: &mut OverallModelDownloadProgress,
+    overall_progress_payload: &mut OverallModelDownloadProgressInternal, // Changed type
     current_attempt: usize,
     max_attempts: usize,
 ) -> Result<PathBuf, String> {
@@ -194,7 +194,7 @@ pub async fn download_single_model(
                             model_name: model_config.name.clone(),
                             downloaded_bytes: downloaded_size,
                             total_bytes: total_size,
-                            progress_percentage,
+                            progress: progress_percentage, // Changed field name
                         },
                     );
                     last_progress_emit_time = now;
@@ -233,7 +233,7 @@ pub async fn download_single_model(
             model_name: model_config.name.clone(),
             downloaded_bytes: downloaded_size,
             total_bytes: total_size,
-            progress_percentage: final_progress_percentage,
+            progress: final_progress_percentage, // Changed field name
         },
     );
 

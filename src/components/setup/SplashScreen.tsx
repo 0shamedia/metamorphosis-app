@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import { useRouter } from 'next/navigation'; // Import useRouter
 // Removed Image from 'next/image' as it's not used in the new logo component directly
 
 // CSS for animations from the new example
@@ -93,10 +94,11 @@ const ButterflyLogo = () => (
 );
 
 interface SplashScreenProps {
-  onComplete: () => void;
+  onComplete: (destination: 'setup' | 'title') => void;
 }
 
 export default function SplashScreenComponent({ onComplete }: SplashScreenProps) {
+  const router = useRouter(); // Get router instance
   const [loadingText, setLoadingText] = useState('Initializing...');
   const [progress, setProgress] = useState(0); // For visual progress bar
   const [isBackendReady, setIsBackendReady] = useState(false); // Final readiness for main app
@@ -113,6 +115,7 @@ const isStartingServicesRef = useRef(isStartingServices);
   // Backend communication logic
   useEffect(() => {
     console.log('[SplashScreen] Component mounted at:', new Date().toISOString());
+    console.log('[SplashScreen] Setting up backend event listeners...');
     let unlistenSetupStatus: (() => void) | null = null;
     let unlistenInstallation: (() => void) | null = null;
     let unlistenBackendStatus: (() => void) | null = null;
@@ -132,6 +135,7 @@ const isStartingServicesRef = useRef(isStartingServices);
           const rawPayload = event.payload;
           console.log(`[SplashScreen] Raw event.payload:`, rawPayload);
           console.log(`[SplashScreen] typeof event.payload:`, typeof rawPayload);
+          console.log(`[SplashScreen] Current state before processing setup_status: isStartingServices=${isStartingServicesRef.current}, isBackendReady=${isBackendReady}, navigateToSetup=${navigateToSetup}, initializationError=${initializationError}`);
 
           if (typeof rawPayload !== 'object' || rawPayload === null) {
             console.error('[SplashScreen] Malformed: event.payload is not an object or is null. Payload:', rawPayload);
@@ -160,13 +164,17 @@ const isStartingServicesRef = useRef(isStartingServices);
 
           switch (inspectedPayload.type) {
             case "backendFullyVerifiedAndReady":
-              console.log('[SplashScreen] Backend is fully verified and ready (files). Attempting to start backend services.');
+              console.log('[SplashScreen] setup_status: backendFullyVerifiedAndReady received. Attempting to start backend services.');
               setLoadingText('File verification complete. Starting backend services...');
               setProgress(75);
               
-              if (initialVerificationTimerId) clearTimeout(initialVerificationTimerId);
-              initialVerificationTimerId = null;
+              if (initialVerificationTimerId) {
+                console.log('[SplashScreen] Clearing initial verification timer.');
+                clearTimeout(initialVerificationTimerId);
+                initialVerificationTimerId = null;
+              }
               
+              console.log('[SplashScreen] Setting isStartingServices to true, navigateToSetup to false.');
               setIsStartingServices(true);
               setNavigateToSetup(false);
               ensurePromiseResolvedRef.current = false; // Reset for this attempt
@@ -232,26 +240,40 @@ const isStartingServicesRef = useRef(isStartingServices);
               break;
             case "fullSetupRequired":
               const reason = inspectedPayload.data?.reason || "Unknown reason";
-              console.log(`[SplashScreen] Full setup required. Reason: ${reason}`);
+              console.log(`[SplashScreen] setup_status: fullSetupRequired received. Reason: ${reason}`);
               setLoadingText(`Setup required: ${reason}`);
               setProgress(50);
               setIsBackendReady(false);
+              console.log('[SplashScreen] Setting navigateToSetup to true, isStartingServices to false.');
               setNavigateToSetup(true);
               setIsStartingServices(false);
-              if (initialVerificationTimerId) clearTimeout(initialVerificationTimerId);
-              initialVerificationTimerId = null;
-              if (serviceStartupTimerId) clearTimeout(serviceStartupTimerId); // Should not be active, but clear just in case
-              serviceStartupTimerId = null;
+              if (initialVerificationTimerId) {
+                console.log('[SplashScreen] Clearing initial verification timer.');
+                clearTimeout(initialVerificationTimerId);
+                initialVerificationTimerId = null;
+              }
+              if (serviceStartupTimerId) { // Should not be active, but clear just in case
+                console.log('[SplashScreen] Clearing service startup timer.');
+                clearTimeout(serviceStartupTimerId);
+                serviceStartupTimerId = null;
+              }
               break;
             default:
               console.warn(`[SplashScreen] Received unhandled setup_status type: '${inspectedPayload.type}'. Full payload:`, inspectedPayload);
               setLoadingText(`Received unexpected status: ${inspectedPayload.type}`);
               setInitializationError(`Unexpected status: ${inspectedPayload.type}`);
+              console.log('[SplashScreen] Setting navigateToSetup to true due to unhandled status.');
               setNavigateToSetup(true);
-              if (initialVerificationTimerId) clearTimeout(initialVerificationTimerId);
-              initialVerificationTimerId = null;
-              if (serviceStartupTimerId) clearTimeout(serviceStartupTimerId);
-              serviceStartupTimerId = null;
+              if (initialVerificationTimerId) {
+                console.log('[SplashScreen] Clearing initial verification timer.');
+                clearTimeout(initialVerificationTimerId);
+                initialVerificationTimerId = null;
+              }
+              if (serviceStartupTimerId) {
+                console.log('[SplashScreen] Clearing service startup timer.');
+                clearTimeout(serviceStartupTimerId);
+                serviceStartupTimerId = null;
+              }
               break;
           }
         });
@@ -265,6 +287,7 @@ const isStartingServicesRef = useRef(isStartingServices);
         const installationListener = await listen('installation-status', (event) => {
             const payload = event.payload as { step: string; message: string; is_error: boolean };
             console.log(`[SplashScreen] Received installation status (during initial check or if setup starts):`, payload);
+            console.log(`[SplashScreen] Current state before processing installation-status: isStartingServices=${isStartingServicesRef.current}, isBackendReady=${isBackendReady}, navigateToSetup=${navigateToSetup}, initializationError=${initializationError}`);
             // Only update if full setup hasn't been explicitly required by setup_status yet
             if (!navigateToSetup) {
                 setLoadingText(payload.message || `Step: ${payload.step}`);
@@ -274,6 +297,7 @@ const isStartingServicesRef = useRef(isStartingServices);
                 // If an error occurs here, it might mean the initial get_setup_status_and_initialize failed
                 // or a quick verification step failed in a way that emits this.
                 setInitializationError(payload.message || 'Installation process error');
+                console.log('[SplashScreen] Setting navigateToSetup to true due to installation error.');
                 setNavigateToSetup(true); // Likely need to go to setup screen to retry/show error
             }
         });
@@ -283,30 +307,41 @@ const isStartingServicesRef = useRef(isStartingServices);
         const backendStatusListener = await listen('backend-status', (event) => {
             const payload = event.payload as { status: string; message: string; isError: boolean };
             console.log(`[SplashScreen] Received backend-status:`, payload);
+            console.log(`[SplashScreen] Current state before processing backend-status: isStartingServices=${isStartingServicesRef.current}, isBackendReady=${isBackendReady}, navigateToSetup=${navigateToSetup}, initializationError=${initializationError}`);
 
             if (isStartingServicesRef.current) { // Use ref here
                 if (payload.status === 'backend_ready' && !payload.isError) {
-                    console.log('[SplashScreen] Backend services reported ready.');
+                    console.log('[SplashScreen] backend-status: backend_ready received. Setting isBackendReady to true.');
                     setLoadingText('Backend services started. Launching application...');
                     setProgress(100);
                     setIsBackendReady(true);
                     setIsStartingServices(false);
                     // Clear service timer on success
-                    if (serviceStartupTimerId) clearTimeout(serviceStartupTimerId);
-                    serviceStartupTimerId = null;
+                    if (serviceStartupTimerId) {
+                      console.log('[SplashScreen] Clearing service startup timer.');
+                      clearTimeout(serviceStartupTimerId);
+                      serviceStartupTimerId = null;
+                    }
                 } else if (payload.isError || payload.status === 'backend_error') {
                     console.error('[SplashScreen] Error during backend service startup:', payload.message);
                     setLoadingText(`Error starting services: ${payload.message}`);
                     setInitializationError(payload.message || 'Backend service startup failed');
+                    console.log('[SplashScreen] Setting navigateToSetup to true due to backend-status error.');
                     setNavigateToSetup(true);
                     setIsStartingServices(false);
                     // Clear service timer on error
-                    if (serviceStartupTimerId) clearTimeout(serviceStartupTimerId);
-                    serviceStartupTimerId = null;
+                    if (serviceStartupTimerId) {
+                      console.log('[SplashScreen] Clearing service startup timer.');
+                      clearTimeout(serviceStartupTimerId);
+                      serviceStartupTimerId = null;
+                    }
                 } else {
                     // Other backend statuses like 'starting_sidecar', 'sidecar_spawned_checking_health'
+                    console.log(`[SplashScreen] backend-status: received status '${payload.status}'. Updating loading text.`);
                     setLoadingText(payload.message || 'Starting backend services...');
                 }
+            } else {
+              console.log('[SplashScreen] Received backend-status but isStartingServicesRef.current is false. Ignoring.');
             }
         });
         unlistenBackendStatus = backendStatusListener;
@@ -323,10 +358,14 @@ const isStartingServicesRef = useRef(isStartingServices);
           console.error('[SplashScreen] get_setup_status_and_initialize command CATCH block triggered. Error:', errorMessage);
           setLoadingText(`Error: ${errorMessage}`);
           setInitializationError(errorMessage);
+          console.log('[SplashScreen] Setting navigateToSetup to true due to get_setup_status_and_initialize command error.');
           setNavigateToSetup(true);
           // Clear initial timer on error
-          if (initialVerificationTimerId) clearTimeout(initialVerificationTimerId);
-          initialVerificationTimerId = null;
+          if (initialVerificationTimerId) {
+            console.log('[SplashScreen] Clearing initial verification timer.');
+            clearTimeout(initialVerificationTimerId);
+            initialVerificationTimerId = null;
+          }
         }
 
       } catch (error) {
@@ -334,10 +373,14 @@ const isStartingServicesRef = useRef(isStartingServices);
         const errorMsg = 'Failed to initialize communication with backend.';
         setLoadingText(`Error: ${errorMsg}`);
         setInitializationError(errorMsg);
+        console.log('[SplashScreen] Setting navigateToSetup to true due to Tauri API import error.');
         setNavigateToSetup(true);
         // Clear initial timer on error
-        if (initialVerificationTimerId) clearTimeout(initialVerificationTimerId);
-        initialVerificationTimerId = null;
+        if (initialVerificationTimerId) {
+          console.log('[SplashScreen] Clearing initial verification timer.');
+          clearTimeout(initialVerificationTimerId);
+          initialVerificationTimerId = null;
+        }
       }
     };
 
@@ -370,31 +413,15 @@ const isStartingServicesRef = useRef(isStartingServices);
 
   // Effect to call onComplete when a navigation decision is made
   useEffect(() => {
+    console.log(`[SplashScreen] Navigation effect triggered. isBackendReady: ${isBackendReady}, navigateToSetup: ${navigateToSetup}`);
     if (isBackendReady) { // Navigate to main app
-      console.log('[SplashScreen] Backend is ready, calling onComplete to navigate to main application.');
-      const timer = setTimeout(() => {
-        onComplete(); // This should navigate to main app (e.g., /title)
-      }, 1000);
-      return () => clearTimeout(timer);
+      console.log('[SplashScreen] Backend is ready, calling onComplete to navigate to main application (Title Scene).');
+      // Directly navigate from SplashScreen to isolate the issue
+      console.log('[SplashScreen] Backend is ready, attempting window.location.href navigation to /title.');
+      window.location.href = '/title';
     } else if (navigateToSetup) { // Navigate to SetupScreen
-      console.log('[SplashScreen] Full setup required, calling onComplete to navigate to setup screen.');
-       const timer = setTimeout(() => {
-        // Modify onComplete or pass a parameter if SplashScreen's onComplete directly goes to main app.
-        // For now, assuming onComplete can handle routing or a different callback is needed for setup.
-        // Let's assume onComplete is smart or we adjust App.tsx routing.
-        // A more robust way would be for onComplete to take a route: onComplete('/setup') or onComplete('/title')
-        // Or, SplashScreen itself uses router.push. For now, signaling via onComplete.
-        // This might require onComplete to be (destination?: string) => void;
-        // For this iteration, we'll rely on a convention or a later router.push here.
-        
-        // TEMPORARY: Direct navigation for clarity, assuming useRouter is available
-        // import { useRouter } from 'next/navigation';
-        // const router = useRouter();
-        // router.push('/setup');
-        // This direct push is better. For now, I'll stick to onComplete and note this for review.
-        onComplete(); // This should navigate to /setup
-      }, 1000);
-      return () => clearTimeout(timer);
+      console.log('[SplashScreen] Full setup required, attempting window.location.href navigation to /setup.');
+      window.location.href = '/setup';
     }
   }, [isBackendReady, navigateToSetup, onComplete]);
   

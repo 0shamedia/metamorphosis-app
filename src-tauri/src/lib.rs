@@ -9,6 +9,17 @@ mod setup;                 // This file re-exports from setup_manager
 pub mod sidecar_manager;   // Declare the new top-level module
 pub mod setup_manager;     // Declare the new top-level module
 
+// Command to get workflow templates
+#[tauri::command]
+fn get_workflow_template(workflow_type: String) -> Result<String, String> {
+    match workflow_type.as_str() {
+        "face" => Ok(include_str!("../../resources/workflows/face_workflow_template.json").to_string()),
+        "fullbody" => Ok(include_str!("../../resources/workflows/fullbody_workflow_template.json").to_string()),
+        "fullbody_detailer" => Ok(include_str!("../../resources/workflows/fullbody_workflow_facedetailer.json").to_string()),
+        _ => Err(format!("Invalid workflow type requested: {}", workflow_type)),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let app_start_time = std::time::Instant::now();
@@ -124,7 +135,9 @@ pub fn run() {
       setup_manager::orchestration::get_setup_status_and_initialize,
       // Register the new backend readiness command
       sidecar_manager::orchestration::ensure_backend_ready,
-      sidecar_manager::orchestration::ensure_comfyui_running_and_healthy
+      sidecar_manager::orchestration::ensure_comfyui_running_and_healthy,
+      // Register the new workflow template command
+      get_workflow_template
     ])
     .on_window_event(|window, event| match event {
         tauri::WindowEvent::Destroyed => {

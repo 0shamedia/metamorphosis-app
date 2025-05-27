@@ -3,7 +3,7 @@ use std::fs;
 use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
 // use std::env; // No longer needed directly here for path resolution
 use std::path::PathBuf; // Still needed for PathBuf type
-use log::{info, error};
+use log::{info, error, debug};
 use crate::gpu_detection::{GpuType, get_gpu_info};
 use tauri::{AppHandle, Wry}; // Removed unused Manager, Emitter
 // use serde::Serialize; // Unused
@@ -125,15 +125,53 @@ async fn run_command_for_setup_progress(
         let mut line_buf = String::new();
         while let Ok(n) = reader.read_line(&mut line_buf).await {
             if n == 0 { break; } // EOF
-            let line_to_emit = line_buf.trim_end().to_string();
-            info!("Stdout (setup): {}", line_to_emit);
-            let step_name = format!("{}: {}", current_step_base_clone_stdout, line_to_emit);
-            // Progress doesn't change per line here, just detail_message
-            setup::emit_setup_progress(&app_handle_clone_stdout, &phase_clone_stdout, &step_name, progress_current_phase, Some(line_to_emit), None);
+            let line_to_process = line_buf.trim_end().to_string();
+            info!("Stdout (setup): {}", line_to_process);
+            let lower_line = line_to_process.to_lowercase();
+
+            let is_key_action = lower_line.starts_with("collecting ") ||
+                                lower_line.starts_with("downloading ") ||
+                                lower_line.starts_with("installing collected packages:") ||
+                                lower_line.starts_with("successfully installed");
+
+            // Lines to generally filter out unless it's a key action
+            let is_generally_verbose = lower_line.starts_with("debug") ||
+                                       lower_line.starts_with("requirement already satisfied") ||
+                                       lower_line.starts_with("using cached") ||
+                                       lower_line.contains("looking in indexes:") ||
+                                       (lower_line.contains("processing ") && lower_line.contains(".whl")) ||
+                                       (lower_line.contains("http://") || lower_line.contains("https://")) && !is_key_action || // Filter raw URLs if not part of a key action like "Downloading X from URL"
+                                       lower_line.contains("satisfied constraint") ||
+                                       lower_line.contains("source distribution") ||
+                                       (lower_line.contains("building wheel for") && !is_key_action) ||
+                                       (lower_line.contains("running setup.py install for") && !is_key_action) ||
+                                       lower_line.contains("cache entry deserialization failed") ||
+                                       (lower_line.starts_with("  ") && !is_key_action) || // Filter most indented lines unless it's a key action that happens to be indented
+                                       lower_line.starts_with("running command ") ||
+                                       lower_line.starts_with("found existing installation:") ||
+                                       lower_line.starts_with("attempting uninstall:") ||
+                                       lower_line.starts_with("successfully uninstalled");
+            
+            // Determine if the line should be emitted to the frontend
+            let should_emit = is_key_action || !is_generally_verbose;
+
+            if should_emit {
+                // Emit as detail message, keeping the current_step_base as the main step title
+                setup::emit_setup_progress(
+                    &app_handle_clone_stdout,
+                    &phase_clone_stdout,
+                    &current_step_base_clone_stdout, // Use the original step base as the main title
+                    progress_current_phase,
+                    Some(line_to_process), // The current line becomes the detail message
+                    None
+                );
+            } else {
+                 debug!("Filtered (stdout): {}", line_to_process);
+            }
             line_buf.clear();
         }
     });
-
+ 
     let app_handle_clone_stderr = app_handle.clone();
     let phase_clone_stderr = phase.to_string();
     let current_step_base_clone_stderr = current_step_base.to_string();
@@ -142,22 +180,51 @@ async fn run_command_for_setup_progress(
         let mut line_buf = String::new();
         while let Ok(n) = reader.read_line(&mut line_buf).await {
             if n == 0 { break; } // EOF
-            let line_to_emit = line_buf.trim_end().to_string();
-            error!("Stderr (setup): {}", line_to_emit);
-            let step_name = format!("{}: {}", current_step_base_clone_stderr, line_to_emit);
-            setup::emit_setup_progress(&app_handle_clone_stderr, &phase_clone_stderr, &step_name, progress_current_phase, Some(line_to_emit.clone()), Some(line_to_emit));
+            let line_to_process = line_buf.trim_end().to_string();
+            error!("Stderr (setup): {}", line_to_process); // Log all stderr from backend as error
+            let lower_line = line_to_process.to_lowercase();
+
+            // Filter common non-error stderr messages from pip/builds
+            let is_ignorable_stderr_info = lower_line.contains("defaulting to user installation") ||
+                                           lower_line.contains("consider adding this directory to path") ||
+                                           (lower_line.starts_with("warning: the script ") && lower_line.contains("is installed in")) ||
+                                           (lower_line.starts_with("warning:") && lower_line.contains(" βρίσκεται ")) || // Greek path warning
+                                           lower_line.contains("deprecated") || // Deprecation warnings unless it also says "error"
+                                           lower_line.contains("skipping link:") ||
+                                           (lower_line.contains("note:") && !lower_line.contains("error")) || // General notes unless error
+                                           (lower_line.contains("warning:") && !lower_line.contains("error")) || // General warnings unless error
+                                           lower_line.contains("running build_ext") ||
+                                           lower_line.contains("running build_py") ||
+                                           lower_line.contains("running egg_info") ||
+                                           lower_line.contains("writing ") ||
+                                           lower_line.contains("copying ") ||
+                                           lower_line.contains("creating ");
+
+            if !is_ignorable_stderr_info || lower_line.contains("error:") { // Always show lines containing "error:"
+                // Emit as detail message and error string, keeping the current_step_base as the main step title
+                setup::emit_setup_progress(
+                    &app_handle_clone_stderr,
+                    &phase_clone_stderr,
+                    &current_step_base_clone_stderr, // Use the original step base
+                    progress_current_phase,
+                    Some(line_to_process.clone()), // Detail message
+                    Some(line_to_process) // Error message
+                );
+            } else {
+                 info!("Filtered/Demoted (stderr): {}", line_to_process); // Log ignorable stderr as info
+            }
             line_buf.clear();
         }
     });
-
+ 
     let status = child.wait().await?;
-
+ 
     // Debug: Log the raw exit status immediately after waiting
     info!("Debug: Command exit status: {:?}", status);
-
+ 
     stdout_task.await.map_err(|e| format!("Stdout task (setup) panicked: {:?}", e))?;
     stderr_task.await.map_err(|e| format!("Stderr task (setup) panicked: {:?}", e))?;
-
+ 
     if !status.success() {
         // Enhance error message to include the full command string
         let command_string = format!("{:?} {:?}", command_path, args);
@@ -282,7 +349,7 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
     let get_pip_url = "https://bootstrap.pypa.io/get-pip.py";
     let get_pip_path = comfyui_dir.join("get-pip.py");
     
-    setup::emit_setup_progress(app_handle, phase_name, "Downloading get-pip.py", current_phase_progress, Some(format!("From: {}", get_pip_url)), None);
+    setup::emit_setup_progress(app_handle, phase_name, "Downloading get-pip.py", current_phase_progress, Some("Fetching installation script...".to_string()), None);
 
     match reqwest::get(get_pip_url).await {
         Ok(response) => {
@@ -497,6 +564,69 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
     info!("Created internal dependency marker: {}", internal_deps_marker_path.display());
     
     Ok(())
+}
+
+/// Installs Python dependencies from a requirements.txt file for a given custom node.
+pub async fn install_custom_node_dependencies(
+    app_handle: AppHandle<Wry>, // Changed to owned type
+    pack_name: String,          // Changed to owned type
+    pack_dir: PathBuf,          // Changed to owned type
+) -> Result<(), String> {
+    let phase_name = "custom_node_deps"; // Or a more dynamic phase name if needed
+    let mut current_phase_progress: u8 = 0; // Initialize progress for this specific operation
+
+    info!("[CUSTOM_NODE_DEPS] Installing dependencies for {}: {}", pack_name, pack_dir.display());
+    setup::emit_setup_progress(&app_handle, phase_name, &format!("Starting dependency installation for {}", pack_name), current_phase_progress, None, None);
+
+    let requirements_path = pack_dir.join("requirements.txt");
+
+    if !requirements_path.exists() {
+        info!("[CUSTOM_NODE_DEPS] No requirements.txt found for {}. Skipping dependency installation.", pack_name);
+        current_phase_progress = 100;
+        setup::emit_setup_progress(&app_handle, phase_name, &format!("No requirements.txt for {}. Skipping.", pack_name), current_phase_progress, None, None);
+        return Ok(());
+    }
+
+    let venv_python_executable = get_venv_python_executable_path(&app_handle)?;
+
+    if !venv_python_executable.exists() {
+        let err_msg = format!("Venv Python executable not found at {} for {} dependency installation.", venv_python_executable.display(), pack_name);
+        error!("{}", err_msg);
+        setup::emit_setup_progress(&app_handle, "error", &format!("Venv Python Missing for {}", pack_name), current_phase_progress, Some(err_msg.clone()), Some(err_msg.clone()));
+        return Err(err_msg);
+    }
+
+    let step_base = format!("Installing dependencies for {}", pack_name);
+    let pip_args = ["-m", "pip", "install", "-r", requirements_path.to_str().unwrap_or_default()];
+
+    // Use a distinct progress tracking for this sub-operation if run_command_for_setup_progress is phase-scoped
+    // For simplicity, we'll treat this as a single step within the "custom_node_deps" phase.
+    // The progress_weight_of_this_command will be 100 for this single command in this function's scope.
+    match run_command_for_setup_progress(
+        &app_handle,
+        phase_name,
+        &step_base,
+        0, // Start progress from 0 for this specific operation
+        100, // This command represents 100% of this function's task
+        &venv_python_executable,
+        &pip_args,
+        &pack_dir, // Run pip install from within the pack's directory
+        "Reading requirements.txt...",
+        // "Dependencies installed.", // Success message is handled by run_command...
+        &format!("Failed to install dependencies for {}", pack_name),
+    ).await {
+        Ok(final_progress) => {
+            info!("[CUSTOM_NODE_DEPS] Successfully installed dependencies for {}. Final progress: {}", pack_name, final_progress);
+            // emit_setup_progress is handled by run_command_for_setup_progress on success
+            Ok(())
+        }
+        Err(e) => {
+            let err_msg = format!("[CUSTOM_NODE_DEPS] Error installing dependencies for {}: {}", pack_name, e);
+            error!("{}", err_msg);
+            // emit_setup_progress for error is handled by run_command_for_setup_progress
+            Err(err_msg)
+        }
+    }
 }
 
 // Unused function write_temp_python_script removed.

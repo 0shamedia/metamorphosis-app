@@ -1,9 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react'; // Import useCallback
-import { useRouter } from 'next/navigation'; // Import useRouter
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import BackgroundParticles from '../background/BackgroundParticles';
+import ChrysalisLogo from '../branding/ChrysalisLogo';
+import MenuButton from '../ui/MenuButton';
+import VisualSettingsModal from '../settings/VisualSettingsModal';
 
-// CSS for custom animations (from new example)
+// CSS for custom animations
 const styles = `
   @keyframes float {
     0%, 100% { transform: translateY(0); }
@@ -85,7 +89,7 @@ const styles = `
     animation: pulse-light 3s ease-in-out infinite;
   }
   
-  .animate-fade-in-up { /* Base class if needed, though delays are used directly */
+  .animate-fade-in-up {
     animation: fadeInUp 1s ease-out forwards;
   }
   
@@ -116,162 +120,28 @@ const styles = `
     animation: particle-float 4s ease-out forwards;
   }
 
-  /* Added from existing logo - might need adjustment */
   .bg-pattern { 
     /* Define your pattern background here if needed */
     /* Example: background-image: url('/path/to/texture.png'); */
   }
 `;
 
-// Define Particle State interface
-interface ParticleState {
-  id: number;
-  x: number;
-  y: number;
-  size: number;
-  speed: number;
-  hue: number;
-}
+export default function TitleScreenComponent() {
+  const [showSplash, setShowSplash] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const router = useRouter();
 
-// Floating particles component (from new example)
-const BackgroundParticles = () => {
-  const [particles, setParticles] = useState<ParticleState[]>([]); // Use ParticleState[] type
-  
-  const generateParticles = useCallback((count = 10) => {
-    const newParticles: ParticleState[] = []; // Explicitly type newParticles
-    const now = Date.now();
-    for (let i = 0; i < count; i++) {
-      newParticles.push({
-        id: now + i,
-        x: Math.random() * 100,
-        y: Math.random() * 100,
-        size: Math.random() * 5 + 2,
-        speed: Math.random() * 2 + 2,
-        hue: Math.floor(Math.random() * 60) + 280 // Purple to pink range
-      });
-    }
-    
-    setParticles(prev => [...prev.slice(-50), ...newParticles]); // Keep max 50 + new particles
-    
-    // Clean up oldest particles after animation completes
-    // This needs adjustment if generateParticles is called frequently
-    // A better approach might be to filter based on ID/timestamp in the render
-  }, []);
-
-  useEffect(() => {
-    generateParticles(20); // Initial burst
-    const interval = setInterval(() => {
-      generateParticles(1); // Add slowly
-    }, 500); // Adjusted interval
-    
-    return () => clearInterval(interval);
-  }, [generateParticles]);
-  
-  return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none">
-      {particles.map(particle => (
-        <div 
-          key={particle.id}
-          className="absolute rounded-full animate-particle"
-          style={{
-            left: `${particle.x}%`,
-            top: `${particle.y}%`,
-            width: `${particle.size}px`,
-            height: `${particle.size}px`,
-            backgroundColor: `hsl(${particle.hue}, 70%, 70%)`,
-            animationDuration: `${particle.speed}s`
-          }}
-        />
-      ))}
-    </div>
-  );
-};
-
-
-// Chrysalis logo component (from existing, with added animations)
-const ChrysalisLogo = () => (
-  // Added animate-float from new example
-  <div className="relative w-64 h-64 mb-4 animate-float"> 
-    {/* Main chrysalis shape with gradient */}
-    <div className="absolute inset-0 flex items-center justify-center">
-      <div className="relative w-40 h-56">
-        {/* Chrysalis outline */}
-        <div className="absolute w-full h-full border-2 border-white/40 rounded-full transform scale-y-[1.8] scale-x-[0.9]"></div>
-        
-        {/* Internal glow - Added animate-pulse-light from new example */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 bg-white rounded-full blur-xl opacity-80 animate-pulse-light"></div>
-        
-        {/* Purple-pink gradient fill */}
-        <div className="absolute inset-0 bg-gradient-to-br from-purple-600 to-pink-500 rounded-full transform scale-y-[1.8] scale-x-[0.9] opacity-40"></div>
-        
-        {/* Overlay texture for chrysalis - Added bg-pattern class */}
-        <div className="absolute inset-0 overflow-hidden rounded-full transform scale-y-[1.8] scale-x-[0.9]">
-          <div className="absolute inset-0 opacity-30 bg-pattern"></div>
-        </div>
-      </div>
-    </div>
-    
-    {/* Additional light beams (from existing) */}
-    {[...Array(8)].map((_, i) => (
-      <div 
-        key={i}
-        className="absolute w-1 h-16 bg-white blur-sm opacity-20"
-        style={{
-          left: '50%',
-          top: '50%',
-          transformOrigin: 'center',
-          transform: `translate(-50%, -50%) rotate(${i * 45}deg)`
-        }}
-      />
-    ))}
-    
-    {/* Ambient glow (from existing) */}
-    <div className="absolute inset-0 rounded-full bg-purple-500/30 blur-3xl"></div>
-  </div>
-);
-
-// Menu Button (from existing, added animation class application)
-const MenuButton = ({ children, delay, primary = false, onClick }: { 
-  children: React.ReactNode; 
-  delay?: string; // Made delay optional and string for class name
-  primary?: boolean; 
-  onClick: () => void;
-}) => (
-  <button
-    // Added animation class based on delay prop
-    className={`relative overflow-hidden w-64 py-3 rounded-lg font-semibold text-lg transform transition-transform duration-200 hover:scale-105 active:scale-95 ${
-      primary
-        ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white animate-fade-in-up-delay-1' 
-        : `bg-white/20 backdrop-blur-sm text-white border border-white/30 ${delay ? `animate-fade-in-up-delay-${delay}` : 'animate-fade-in-up'}` // Apply delay class
-    }`}
-    onClick={onClick}
-  >
-    <div className="relative z-10">{children}</div>
-    {primary && (
-      <div className="absolute inset-0 opacity-0 hover:opacity-100 transition-opacity duration-300">
-        <div className="absolute inset-0 bg-gradient-to-r from-pink-600 to-purple-600"></div>
-      </div>
-    )}
-  </button>
-);
-
-export default function TitleScreenComponent() { // Renamed component
-  const [showSplash, setShowSplash] = useState(true); // From new example
-  const router = useRouter(); // Use Next.js router
-
-  // From new example: Hide the splash after animation completes
   useEffect(() => {
     const timer = setTimeout(() => {
       setShowSplash(false);
-    }, 2500); // Adjust timing as needed
+    }, 100); // Significantly reduced timing
     
     return () => clearTimeout(timer);
   }, []);
 
-  // Updated navigation handlers
   const handleCreateCharacter = () => {
     console.log('Create character clicked');
-    router.push('/character-creation'); // Navigate using router
+    router.push('/character-creation');
   };
   
   const handleLoadCharacter = () => {
@@ -280,13 +150,16 @@ export default function TitleScreenComponent() { // Renamed component
     // router.push('/load-character'); 
   };
   
-  const handleModuleLibrary = () => {
-    console.log('Module library clicked');
-    // Add navigation logic here
-    // router.push('/modules');
+  const handleOptionsClick = () => {
+    console.log('Options clicked');
+    setShowSettings(true);
   };
 
-  // Background stars logic (from existing)
+  const handleCloseSettings = () => {
+    setShowSettings(false);
+  };
+
+  // Background stars logic
   const stars = Array.from({ length: 100 }, (_, i) => ({
     id: i,
     size: Math.random() * 2 + 1,
@@ -298,10 +171,10 @@ export default function TitleScreenComponent() { // Renamed component
   return (
     <>
       <style>{styles}</style>
-      <div className="h-screen w-screen overflow-hidden">
-        {/* Background with gradient and effects (from existing) */}
+      <div className="h-screen w-screen overflow-hidden"> {/* Added overflow-hidden here as well */}
+        {/* Background with gradient and effects */}
         <div className="absolute inset-0 bg-gradient-to-b from-purple-900 via-purple-800 to-pink-800">
-          {/* Star-like dots (from existing) */}
+          {/* Star-like dots */}
           <div className="absolute inset-0 opacity-30">
             {stars.map(star => (
               <div
@@ -318,32 +191,29 @@ export default function TitleScreenComponent() { // Renamed component
             ))}
           </div>
           
-          {/* Gradient orbs (from existing) */}
+          {/* Gradient orbs */}
           <div className="absolute top-1/4 left-1/4 w-1/2 h-1/2 rounded-full bg-purple-500/20 blur-3xl"></div>
           <div className="absolute bottom-1/4 right-1/4 w-1/2 h-1/2 rounded-full bg-pink-500/20 blur-3xl"></div>
         </div>
         
-        {/* Animated particles (from new example) */}
         <BackgroundParticles />
         
-        {/* Main content (structure from existing) */}
-        <div className="relative z-10 h-full w-full flex flex-col items-center justify-center p-6">
+        {/* Main content */}
+        <div className="relative z-10 h-full w-full flex flex-col items-center justify-between p-2 sm:p-2 md:p-3 lg:p-4 xl:p-6 overflow-hidden">
           {/* Logo and title */}
-          <div className="flex flex-col items-center mb-12">
-            <ChrysalisLogo /> 
+          <div className="flex flex-col items-center mb-1 sm:mb-2 md:mb-2 lg:mb-3 xl:mb-8">
+            <ChrysalisLogo />
             
-            {/* Added animate-glow from new example */}
-            <h1 className="text-5xl sm:text-6xl font-bold text-white animate-glow">
+            <h1 className="relative z-10 text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold text-white animate-glow -mt-8 sm:-mt-10 md:-mt-12 lg:-mt-14 xl:-mt-16">
               Metamorphosis
             </h1>
-            {/* Added animate-fade-in from new example */}
-            <p className="text-purple-200 mt-2 animate-fade-in opacity-80">
+            <p className="text-xs sm:text-sm md:text-base lg:text-lg xl:text-xl text-purple-200 mt-1 sm:mt-1 md:mt-2 lg:mt-2 xl:mt-3 animate-fade-in opacity-80">
               A Character Creation Experience
             </p>
           </div>
           
-          {/* Menu buttons (structure from existing, added delay props for animation) */}
-          <div className="flex flex-col space-y-4 items-center">
+          {/* Menu buttons */}
+          <div className="flex flex-col space-y-1 sm:space-y-2 md:space-y-2 lg:space-y-3 xl:space-y-4 items-center mt-1 sm:mt-2 md:mt-2 lg:mt-3 xl:mt-8">
             <MenuButton primary={true} onClick={handleCreateCharacter}>
               Create Character
             </MenuButton>
@@ -352,33 +222,34 @@ export default function TitleScreenComponent() { // Renamed component
               Load Character
             </MenuButton>
             
-            <MenuButton delay="3" onClick={handleModuleLibrary}>
-              Module Library
+            <MenuButton delay="3" onClick={handleOptionsClick}>
+              Options
             </MenuButton>
           </div>
           
-          {/* Developer note (from existing) */}
-          <div className="absolute bottom-8 text-xs text-white/50 text-center max-w-xs">
+          {/* Developer note */}
+          <div className="mt-auto text-[0.55rem] sm:text-[0.65rem] md:text-xs lg:text-sm text-white/50 text-center max-w-[150px] sm:max-w-[170px] md:max-w-xs lg:max-w-sm pt-4"> {/* Added pt-4 for spacing from buttons */}
             <p>A modular framework for character creation</p>
             <p className="mt-1">Build your own experiences with the Metamorphosis engine</p>
           </div>
           
-          {/* Version number (from existing) */}
-          <div className="absolute bottom-4 right-4 text-xs text-white/40">
+          {/* Version number */}
+          <div className="text-[0.55rem] sm:text-[0.65rem] md:text-xs text-white/40 mt-2 self-end mr-2 sm:mr-3 md:mr-4"> {/* Adjusted to be part of flow, self-end for right alignment */}
             Version 0.1.0
           </div>
-        </div>
+          </div>
         
-        {/* Initial splash animation (from new example) */}
+        {/* Initial splash animation */}
         {showSplash && (
           <div className="absolute inset-0 bg-purple-900 z-50 flex items-center justify-center animate-fade-in">
-            {/* Added animate-scale-in */}
             <div className="animate-scale-in"> 
               <ChrysalisLogo />
             </div>
           </div>
         )}
       </div>
+
+      <VisualSettingsModal show={showSettings} onClose={handleCloseSettings} />
     </>
   );
 }

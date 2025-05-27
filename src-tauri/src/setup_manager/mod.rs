@@ -52,7 +52,7 @@ pub use model_events::{
     ModelDownloadProgressPayload,
     ModelDownloadCompletePayload,
     ModelDownloadFailedPayload,
-    OverallModelDownloadProgress,
+    OverallModelDownloadProgressInternal, // Changed from OverallModelDownloadProgress
     emit_model_download_progress,
     emit_model_download_complete,
     emit_model_download_failed,
@@ -71,4 +71,6 @@ pub use model_config::{
 // Re-export from custom_node_management
 pub use custom_node_management::{
     clone_comfyui_ipadapter_plus,
+    clone_comfyui_impact_pack,
+    clone_comfyui_impact_subpack,
 };

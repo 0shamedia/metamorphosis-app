@@ -108,7 +108,9 @@ pub(super) fn spawn_comfyui_process(app_handle: AppHandle<Wry>) -> Pin<Box<dyn F
             "--front-end-version".to_string(), 
             "Comfy-Org/ComfyUI_frontend@v1.18.2".to_string(), 
             "--port".to_string(), 
-            COMFYUI_PORT.to_string(), 
+            COMFYUI_PORT.to_string(),
+            "--enable-cors-header".to_string(),
+            "*".to_string(), // Allow all origins for now, can be restricted later
         ];
 
         let use_cpu = match gpu_info.gpu_type {
@@ -124,9 +126,9 @@ pub(super) fn spawn_comfyui_process(app_handle: AppHandle<Wry>) -> Pin<Box<dyn F
                 info!("Intel GPU detected. Currently defaulting to CPU mode. Intel GPU support needs to be implemented.");
                 true 
             }
-            GpuType::Other | GpuType::Unknown => {
-                info!("Other or Unknown GPU type detected, adding --cpu flag.");
-                true 
+            GpuType::Unknown => {
+                info!("Unknown GPU type detected, adding --cpu flag.");
+                true
             }
         };
 

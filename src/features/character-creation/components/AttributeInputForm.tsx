@@ -3,12 +3,12 @@ import TextInput from './TextInput';
 import DropdownSelect from './DropdownSelect';
 import SliderInput from './SliderInput';
 import useCharacterStore from '../../../store/characterStore';
-import { sendPromptToComfyUI } from '../../../services/comfyuiService';
+// import { sendPromptToComfyUI } from '../../../services/comfyuiService'; // Removed
 import { Anatomy, Ethnicity, HairColor, EyeColor, BodyType } from '../../../types/character';
 
 const AttributeInputForm: React.FC = () => {
   const [name, setName] = useState('Player');
-  const { setCharacterAttribute, setLoading, setError } = useCharacterStore();
+  const { setCharacterAttribute } = useCharacterStore(); // Removed setLoading and setError as they are not used here
   const [anatomy, setAnatomy] = useState('');
   const [genderExpression, setGenderExpression] = useState(0);
   const [ethnicity, setEthnicity] = useState('');
@@ -100,29 +100,29 @@ const AttributeInputForm: React.FC = () => {
                       name.trim() !== '' && anatomy !== '' && ethnicity !== '' && hairColor !== '' && eyeColor !== '' && bodyType !== '';
 
 
-  const handleGenerate = async () => {
-    setLoading(true);
-    setError(null);
+  // const handleGenerate = async () => { // Removed this function
+  //   setLoading(true);
+  //   setError(null);
 
-    const characterAttributes = useCharacterStore.getState().attributes;
+  //   const characterAttributes = useCharacterStore.getState().attributes;
 
-    // Construct positive prompt
-    try {
-      // Call sendPromptToComfyUI with character data, tags (empty for now), and workflow type
-      const response = await sendPromptToComfyUI(characterAttributes, [], "face");
-      console.log('ComfyUI API Response:', response);
-      // TODO: Handle the response, e.g., update characterImageUrl state
-      setLoading(false);
-    } catch (error) {
-      console.error('Error generating character:', error);
-      setError('Failed to generate character.');
-      setLoading(false);
-    }
-  };
+  //   // Construct positive prompt
+  //   try {
+  //     // Call sendPromptToComfyUI with character data, tags (empty for now), and workflow type
+  //     const response = await sendPromptToComfyUI(characterAttributes, [], "face");
+  //     console.log('ComfyUI API Response:', response);
+  //     // TODO: Handle the response, e.g., update characterImageUrl state
+  //     setLoading(false);
+  //   } catch (error) {
+  //     console.error('Error generating character:', error);
+  //     setError('Failed to generate character.');
+  //     setLoading(false);
+  //   }
+  // };
 
   return (
-    <div>
-      <h2>Character Attributes</h2>
+    <div className="p-4 rounded-lg space-y-6">
+      <h2 className="text-2xl font-semibold text-purple-100 mb-6 text-center" style={{ textShadow: '0 0 8px rgba(220, 180, 255,0.4)' }}>Define Attributes</h2>
       <TextInput label="Name" value={name} onChange={handleNameChange} error={nameError} />
       <DropdownSelect
         label="Anatomy"
@@ -168,9 +168,18 @@ const AttributeInputForm: React.FC = () => {
         error={bodyTypeError}
       />
 
-      <button onClick={handleGenerate} disabled={!isFormValid}>
-        Generate Your Character
-      </button>
+      {/* The "Generate Face" button is now part of the parent page.tsx for layout reasons */}
+      {/* <button
+        onClick={handleGenerate}
+        disabled={!isFormValid}
+        className={`w-full mt-6 font-semibold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-opacity-75 ${
+          isFormValid
+          ? 'bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white focus:ring-pink-400'
+          : 'bg-gray-700 text-gray-400 cursor-not-allowed opacity-70'
+        }`}
+      >
+        Generate Face (from Form)
+      </button> */}
     </div>
   );
 };

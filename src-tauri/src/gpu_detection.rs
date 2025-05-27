@@ -6,7 +6,6 @@ pub enum GpuType {
     Nvidia,
     Amd,
     Intel,
-    Other,
     Unknown, // Added Unknown variant
 }
 
@@ -171,7 +170,7 @@ pub fn get_gpu_info() -> GpuInfo {
                                 break; // Found the primary GPU, exit loop
                             } else {
                                 info!("Detected other or unknown GPU via lspci: {}", line.trim());
-                                gpu_type = GpuType::Other;
+                                gpu_type = GpuType::Unknown;
                                 // Continue searching in case there's a more specific entry
                             }
                         }
@@ -234,7 +233,7 @@ pub fn get_gpu_info() -> GpuInfo {
                                 break; // Found the primary GPU, exit loop
                             } else {
                                 info!("Detected other or unknown GPU via system_profiler: {}", trimmed_line);
-                                gpu_type = GpuType::Other;
+                                gpu_type = GpuType::Unknown;
                                 // Continue searching in case there's a more specific entry
                             }
                         }
@@ -247,7 +246,7 @@ pub fn get_gpu_info() -> GpuInfo {
                         };
                     } else {
                         info!("system_profiler output did not clearly identify a known GPU type.");
-                        // Fall through to other detection methods or default
+                        // Fall through to other methods or default
                     }
 
                 } else {

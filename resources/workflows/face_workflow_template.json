@@ -2,9 +2,9 @@
   "3": {
     "inputs": {
       "seed": 1045994342956494,
-      "steps": 30,
-      "cfg": 5,
-      "sampler_name": "dpmpp_2m_sde",
+      "steps": 20,
+      "cfg": 4.5,
+      "sampler_name": "euler_ancestral",
       "scheduler": "karras",
       "denoise": 1,
       "model": [
@@ -31,7 +31,7 @@
   },
   "4": {
     "inputs": {
-      "ckpt_name": "toonify_Illustrious.safetensors"
+      "ckpt_name": "nova3DCGXL_illustriousV30.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
@@ -51,7 +51,7 @@
   },
   "6": {
     "inputs": {
-      "text": "realistic, best quality, portrait, 1boy, cropped, clothed, looking at viewer, plain background,",
+      "text": "photo of a character, portrait, __DYNAMIC_PROMPT__, simple background, detailed face, high quality",
       "clip": [
         "4",
         1
@@ -64,7 +64,7 @@
   },
   "7": {
     "inputs": {
-      "text": "(blurry), (lowres:1.2), (worst quality:1.4), (low quality:1.4), (bad anatomy:1.4), bad eyes, multiple views, jpeg artifacts, signature, watermark, text, logo, artist name,",
+      "text": "modern, recent, old, oldest, cartoon, anime, graphic, text, painting, crayon, graphite, abstract, glitch, deformed, mutated, ugly, disfigured, long body, lowres, bad anatomy, bad hands, missing fingers, extra digits, fewer digits, cropped, very displeasing, (worst quality, bad quality:1.2), bad anatomy, sketch, jpeg artifacts, signature, watermark, username, conjoined, bad ai-generated, shine, shiny, porcelain skin, naked, nude,",
       "clip": [
         "4",
         1
