@@ -29,7 +29,9 @@ export interface Tag {
 
 // Interface for generated image options
 export interface ImageOption {
-  id: string;
-  url: string;
-  alt: string;
+  id: string; // Could be the ComfyUI prompt ID or a client-generated one
+  url: string; // This would be the blob URL or data URL from ComfyUI
+  alt: string; // Alt text, e.g., "Face option 1"
+  seed?: string | number; // The seed used for generation, crucial for naming and reproducibility
+  comfyPrompt?: Record<string, any>; // Optional: store the exact prompt sent to ComfyUI
 }

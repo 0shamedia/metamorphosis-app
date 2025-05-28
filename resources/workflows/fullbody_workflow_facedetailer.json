@@ -10,7 +10,7 @@
   },
   "2": {
     "inputs": {
-      "text": "photo of a character, full body, clothed, __DYNAMIC_PROMPT__, simple background, high quality",
+      "text": "photo of a character, full body, clothed, __DYNAMIC_PROMPT__, simple gradient background, high quality",
       "clip": [
         "1",
         1

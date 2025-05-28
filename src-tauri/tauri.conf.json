@@ -19,21 +19,23 @@
           "description": "Capabilities for the main application window",
           "windows": ["main"],
           "permissions": [
-            "core:window:allow-set-size",
-            "core:window:allow-set-fullscreen",
-            "core:window:allow-set-decorations",
-            "core:window:allow-primary-monitor",
-            "core:event:allow-listen",
-            "core:event:default",
-            "core:window:allow-is-decorated",
-            "core:window:allow-is-fullscreen",
-            "core:path:default",
-            "fs:allow-read-text-file",
+            "core:default",
+            "fs:default",
+            {
+              "identifier": "fs:allow-exists",
+              "allow": [{ "path": "$APPLOCALDATA/**" }]
+            },
+            {
+              "identifier": "fs:allow-mkdir",
+              "allow": [{ "path": "$APPLOCALDATA/**" }]
+            },
+            {
+              "identifier": "fs:allow-write-file", 
+              "allow": [{ "path": "$APPLOCALDATA/**" }]
+            },
             {
               "identifier": "http:default",
-              "allow": [
-                { "url": "http://127.0.0.1:8188/*" }
-              ]
+              "allow": [{ "url": "http://127.0.0.1:8188/*" }]
             }
           ]
         }
@@ -41,6 +43,7 @@
     },
     "windows": [
       {
+        "label": "main",
         "fullscreen": false,
         "height": 720,
         "resizable": true,

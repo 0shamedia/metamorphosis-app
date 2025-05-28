@@ -51,7 +51,7 @@
   },
   "6": {
     "inputs": {
-      "text": "photo of a character, portrait, __DYNAMIC_PROMPT__, simple background, detailed face, high quality",
+      "text": "photo of a character, portrait, __DYNAMIC_PROMPT__, simple gradient background, detailed face, high quality",
       "clip": [
         "4",
         1

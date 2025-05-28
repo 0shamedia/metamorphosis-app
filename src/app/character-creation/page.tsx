@@ -7,8 +7,9 @@ import GenerationGallery from '@/features/character-creation/components/Generati
 import AstralMirrorDisplay from '@/features/character-creation/components/AstralMirrorDisplay'; // Import AstralMirrorDisplay
 import StyledToggle from '@/components/ui/StyledToggle';
 import useCharacterStore from '@/store/characterStore';
-import { ImageOption } from '@/types/character';
+import { ImageOption, CharacterAttributes } from '@/types/character'; // Added CharacterAttributes for clarity if needed, though store provides it
 import { initiateImageGeneration, uploadImageToComfyUI } from '@/services/comfyuiService';
+import { saveCharacterImage, generateUUID } from '@/services/imageSaverService'; // Added for finalization
 
 // Placeholder for particle generation logic (can be moved to a separate component)
 const Particles: React.FC = () => {
@@ -82,12 +83,14 @@ const CharacterCreationPage: React.FC = () => {
     // V2 state
     generationProgress,
     error: characterError, // Get error state from store
-    setError: setCharacterError // Action to clear error if needed
+    setError: setCharacterError, // Action to clear error if needed
+    setFinalizedCharacter // Action for finalization
   } = useCharacterStore();
 
   const [activePreview, setActivePreview] = useState<'face' | 'body'>('face');
   const [currentWebsocket, setCurrentWebsocket] = useState<{ close: () => void } | null>(null);
   const [uploadedFaceDetails, setUploadedFaceDetails] = useState<{ filename: string; subfolder?: string } | null>(null);
+  const [isFinalizing, setIsFinalizing] = useState(false); // State for finalization loading
 
 
   useEffect(() => {
@@ -159,7 +162,7 @@ const CharacterCreationPage: React.FC = () => {
     // Directly use the result of uploadImageToComfyUI for the initial generation
     // and also set it to state for regeneration.
     if (faceFile) {
-      const uploadResult = await uploadImageToComfyUI(faceFile, "character_faces_input"); // Use a distinct subfolder
+      const uploadResult = await uploadImageToComfyUI(faceFile, true, "character_faces_input"); // Use a distinct subfolder, overwrite true
       if (uploadResult && uploadResult.filename) {
         setUploadedFaceDetails({ filename: uploadResult.filename, subfolder: uploadResult.subfolder }); // Store details in state for regeneration
 
@@ -224,12 +227,59 @@ const CharacterCreationPage: React.FC = () => {
     setActivePreview('body');
   };
 
-  const handleFinalizeCharacter = () => {
-    if (!selectedFullBody) return;
-    setCreationStep('finalized');
-    // TODO: Navigate to the next part of the game or a summary screen
-    console.log("Character finalized:", { attributes, selectedFace, selectedFullBody });
-    router.push('/game'); // Example navigation
+  const handleFinalizeCharacter = async () => {
+    if (!selectedFace || !selectedFace.url || typeof selectedFace.seed === 'undefined' ||
+        !selectedFullBody || !selectedFullBody.url || typeof selectedFullBody.seed === 'undefined') {
+      setCharacterError("Both face and full body images (with their seeds) must be selected to finalize.");
+      return;
+    }
+
+    setIsFinalizing(true);
+    setCharacterError(null); // Clear previous errors
+
+    try {
+      const newCharacterId = generateUUID();
+
+      // Save face image
+      const savedFace = await saveCharacterImage({
+        characterId: newCharacterId,
+        imageOption: selectedFace,
+        imageType: 'face',
+      });
+
+      // Save full body image
+      const savedBody = await saveCharacterImage({
+        characterId: newCharacterId,
+        imageOption: selectedFullBody,
+        imageType: 'body',
+      });
+
+      // Update character store
+      setFinalizedCharacter({
+        characterId: newCharacterId,
+        attributes: attributes, // Current attributes from store
+        savedFaceImagePath: savedFace.relative,
+        savedFullBodyImagePath: savedBody.relative,
+        faceSeed: selectedFace.seed,
+        bodySeed: selectedFullBody.seed,
+      });
+      
+      console.log("Character finalized and saved:", {
+        characterId: newCharacterId,
+        attributes,
+        facePath: savedFace.relative,
+        bodyPath: savedBody.relative
+      });
+
+      // router.push('/game'); // Navigate to the next scene - Temporarily commented out for testing
+      console.log("[CharacterCreationPage] Navigation to /game commented out for testing finalization state.");
+
+    } catch (error) {
+      console.error("Error finalizing character:", error);
+      setCharacterError(`Finalization failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsFinalizing(false);
+    }
   };
 
   const handleBack = () => {
@@ -482,13 +532,13 @@ const CharacterCreationPage: React.FC = () => {
             {creationStep === 'bodySelection' && (
               <button
                 onClick={handleFinalizeCharacter}
-                disabled={!selectedFullBody || isGeneratingFullBody}
+                disabled={!selectedFace || !selectedFullBody || isGeneratingFace || isGeneratingFullBody || isFinalizing}
                 className={`nav-button primary py-3 px-8 rounded-lg text-white text-base font-semibold transition-all duration-200 ease-in-out hover:translate-y-[-2px]
-                            ${(!selectedFullBody || isGeneratingFullBody)
+                            ${(!selectedFace || !selectedFullBody || isGeneratingFace || isGeneratingFullBody || isFinalizing)
                               ? 'bg-gray-600/30 border border-gray-500/50 text-gray-400/70 cursor-not-allowed opacity-50'
                               : 'bg-gradient-to-r from-teal-500 to-green-500 hover:shadow-green-glow border-none'}`}
               >
-                Finish Character
+                {isFinalizing ? "Finalizing..." : "Finish Character"}
               </button>
             )}
           </nav>

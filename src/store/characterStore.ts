@@ -33,6 +33,13 @@ interface CharacterState {
   // New state for V2 ComfyUI integration
   clientId: string | null;
   generationProgress: GenerationProgress | null;
+
+  // State for finalized character
+  characterId: string | null;
+  savedFaceImagePath: string | null;
+  savedFullBodyImagePath: string | null;
+  faceSeed: string | number | null;
+  bodySeed: string | number | null;
 }
 
 interface CharacterActions {
@@ -54,6 +61,16 @@ interface CharacterActions {
   // New actions for V2 ComfyUI integration
   setClientId: (id: string | null) => void;
   setGenerationProgress: (progress: GenerationProgress | null) => void;
+
+  // Action for finalization
+  setFinalizedCharacter: (data: {
+    characterId: string;
+    attributes: CharacterAttributes; // Pass all attributes again to ensure consistency
+    savedFaceImagePath: string;
+    savedFullBodyImagePath: string;
+    faceSeed: string | number;
+    bodySeed: string | number;
+  }) => void;
 }
 
 const initialAttributes: CharacterAttributes = {
@@ -85,6 +102,12 @@ const useCharacterStore = create<CharacterState & CharacterActions>((set) => ({
 
   clientId: null,
   generationProgress: initialGenerationProgress,
+
+  characterId: null,
+  savedFaceImagePath: null,
+  savedFullBodyImagePath: null,
+  faceSeed: null,
+  bodySeed: null,
 
   setCharacterAttribute: (attribute, value) =>
     set((state) => ({
@@ -121,6 +144,24 @@ const useCharacterStore = create<CharacterState & CharacterActions>((set) => ({
   setClientId: (id) => set(() => ({ clientId: id })),
   setGenerationProgress: (progress) => set(() => ({ generationProgress: progress })),
 
+  setFinalizedCharacter: (data) => set((state) => ({
+    characterId: data.characterId,
+    attributes: { ...data.attributes }, // Ensure all attributes are captured
+    savedFaceImagePath: data.savedFaceImagePath,
+    savedFullBodyImagePath: data.savedFullBodyImagePath,
+    faceSeed: data.faceSeed,
+    bodySeed: data.bodySeed,
+    creationStep: 'finalized', // Mark as finalized
+    // Optionally clear transient generation states if desired, or keep them for review
+    // faceOptions: [],
+    // fullBodyOptions: [],
+    // selectedFace: null, // Or keep the selected ones for display before navigation
+    // selectedFullBody: null,
+    // isGeneratingFace: false,
+    // isGeneratingFullBody: false,
+    // generationProgress: null,
+  })),
+
   resetCreationState: () => set(() => ({
     attributes: { ...initialAttributes },
     tags: [],
@@ -135,6 +176,11 @@ const useCharacterStore = create<CharacterState & CharacterActions>((set) => ({
     error: null,
     clientId: null,
     generationProgress: initialGenerationProgress,
+    characterId: null,
+    savedFaceImagePath: null,
+    savedFullBodyImagePath: null,
+    faceSeed: null,
+    bodySeed: null,
   })),
 }));
 
