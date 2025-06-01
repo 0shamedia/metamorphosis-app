@@ -42,3 +42,5 @@ next-env.d.ts
 
 # Ignore bundled Python runtime
 vendor/python/
+
+target/
