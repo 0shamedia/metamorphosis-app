@@ -4,7 +4,7 @@ use std::time::Duration;
 
 mod comfyui_sidecar;       // This file re-exports from sidecar_manager
 mod gpu_detection;
-mod dependency_management;
+// mod dependency_management; // Deprecated: Logic moved to setup_manager::dependency_manager
 mod setup;                 // This file re-exports from setup_manager
 pub mod sidecar_manager;   // Declare the new top-level module
 pub mod setup_manager;     // Declare the new top-level module

@@ -1,8 +1,16 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react'; // Added useCallback
-import SetupModelDownloader from './SetupModelDownloader'; // Import the new component
-import SetupCustomNodeInstallerStatus from './SetupCustomNodeInstallerStatus'; // Import new component
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import SetupModelDownloader from './SetupModelDownloader';
+import SetupCustomNodeInstallerStatus from './SetupCustomNodeInstallerStatus';
+import { SetupPhase, SetupProgress } from './ui/setupUITypes'; // Import shared types
+import SetupOverallProgressDisplay from './ui/SetupOverallProgressDisplay';
+import SetupPhaseTracker from './ui/SetupPhaseTracker';
+import SetupStepDetailsDisplay from './ui/SetupStepDetailsDisplay';
+import SetupCurrentPhaseProgress from './ui/SetupCurrentPhaseProgress';
+import SetupCompletionDisplay from './ui/SetupCompletionDisplay';
+import SetupErrorDisplay from './ui/SetupErrorDisplay';
+
 import type {
   CustomNodeCloneStartPayload,
   CustomNodeCloneSuccessPayload,
@@ -11,7 +19,6 @@ import type {
   PythonVersionDetectedPayload,
   InsightfaceWheelDownloadStartPayload,
   InsightfaceWheelDownloadProgressPayload,
-  // InsightfaceWheelDownloadCompletePayload, // No payload
   PackageInstallStartPayload,
   PackageInstallSuccessPayload,
   PackageInstallFailedPayload,
@@ -21,87 +28,45 @@ import type {
   PipUpdateFailedPayload,
 } from '../../types/events';
 
-// CSS for custom animations (from new example)
+// CSS for custom animations
 const styles = `
   @keyframes shimmer {
-    0% {
-      background-position: -1000px 0;
-    }
-    100% {
-      background-position: 1000px 0;
-    }
+    0% { background-position: -1000px 0; }
+    100% { background-position: 1000px 0; }
   }
-  
   .animate-shimmer {
     background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.5) 50%, rgba(255,255,255,0) 100%);
     background-size: 1000px 100%;
     animation: shimmer 2s infinite linear;
   }
-  
   @keyframes pulse-ring {
-    0% {
-      transform: scale(0.95);
-      opacity: 0.7;
-    }
-    50% {
-      transform: scale(1.05);
-      opacity: 0.3;
-    }
-    100% {
-      transform: scale(0.95);
-      opacity: 0.7;
-    }
+    0% { transform: scale(0.95); opacity: 0.7; }
+    50% { transform: scale(1.05); opacity: 0.3; }
+    100% { transform: scale(0.95); opacity: 0.7; }
   }
-  
-  .animate-pulse-ring {
-    animation: pulse-ring 2s infinite;
-  }
+  .animate-pulse-ring { animation: pulse-ring 2s infinite; }
 `;
 
-
-// Setup phases in order (from existing)
-type SetupPhase = 'checking' | 'installing_comfyui' | 'python_setup' | 'installing_custom_nodes' | 'downloading_models' | 'finalizing' | 'complete' | 'error';
-
-interface SetupProgress { // This should align with Rust's SetupProgressPayload
-  phase: SetupPhase;
-  currentStep: string;
-  progress: number; // Progress of the current phase (0-100)
-  detailMessage?: string; // Optional
-  error?: string; // Optional
-}
-
+// CustomNodeInstallState remains here as it's specific to this screen's logic
 interface CustomNodeInstallState {
-  // ComfyUI_IPAdapter_plus cloning
   cloneStatus: 'idle' | 'cloning' | 'success' | 'failed' | 'exists';
   cloneNodeName?: string;
   cloneError?: string;
-
-  // Python version
   pythonVersion?: string;
-
-  // Insightface wheel (Windows specific)
   wheelDownloadStatus: 'idle' | 'downloading' | 'complete' | 'failed';
-  wheelDownloadProgress: number; // 0-100
+  wheelDownloadProgress: number;
   wheelDownloadedBytes?: number;
   wheelTotalBytes?: number;
   wheelDownloadUrl?: string;
   wheelError?: string;
-
-  // Pip update
   pipUpdateStatus: 'idle' | 'updating' | 'success' | 'failed';
   pipUpdateError?: string;
-
-  // onnxruntime install
   onnxruntimeInstallStatus: 'idle' | 'installing' | 'success' | 'failed' | 'exists';
   onnxruntimeInstallError?: string;
   onnxruntimeOsHint?: string;
-
-  // insightface install
   insightfaceInstallStatus: 'idle' | 'installing' | 'success' | 'failed' | 'exists';
   insightfaceInstallError?: string;
   insightfaceOsHint?: string;
-
-  // General message for this section
   currentActionMessage?: string;
 }
 
@@ -112,59 +77,6 @@ const initialCustomNodeInstallState: CustomNodeInstallState = {
   pipUpdateStatus: 'idle',
   onnxruntimeInstallStatus: 'idle',
   insightfaceInstallStatus: 'idle',
-};
-
-
-// Individual model download status (from existing) - Commented out as new component handles this
-// This might become obsolete if `setup-progress` for 'downloading_models' is sufficient.
-// interface ModelStatus {
-//   id: string;
-//   name: string;
-//   progress: number; // Progress of this specific model
-//   status: 'queued' | 'downloading' | 'verifying' | 'completed' | 'error';
-//   errorMessage?: string;
-// }
-
-// Phase icons (from existing, unchanged)
-const PhaseIcon = ({ phase }: { phase: SetupPhase }) => {
-  switch (phase) {
-    case 'checking':
-      return (
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M9 16.2L4.8 12L3.4 13.4L9 19L21 7L19.6 5.6L9 16.2Z" fill="currentColor"/>
-        </svg>
-      );
-    case 'installing_comfyui':
-      return (
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M19 9H15V3H9V9H5L12 16L19 9ZM5 18V20H19V18H5Z" fill="currentColor"/>
-        </svg>
-      );
-    case 'python_setup':
-      return (
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M9.4 16.6L4.8 12L9.4 7.4L8 6L2 12L8 18L9.4 16.6ZM14.6 16.6L19.2 12L14.6 7.4L16 6L22 12L16 18L14.6 16.6Z" fill="currentColor"/>
-        </svg>
-      );
-    case 'downloading_models':
-      return (
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4C9.11 4 6.6 5.64 5.35 8.04C2.34 8.36 0 10.91 0 14C0 17.31 2.69 20 6 20H19C21.76 20 24 17.76 24 15C24 12.36 21.95 10.22 19.35 10.04ZM17 13L12 18L7 13H10V9H14V13H17Z" fill="currentColor"/>
-        </svg>
-      );
-    case 'finalizing':
-      return (
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM10 17L5 12L6.41 10.59L10 14.17L17.59 6.58L19 8L10 17Z" fill="currentColor"/>
-        </svg>
-      );
-    default: // Also for 'error' and 'complete' if not handled by specific UI
-      return (
-        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V15H13V17ZM13 13H11V7H13V13Z" fill="currentColor"/>
-        </svg>
-      );
-  }
 };
 
 interface SetupScreenProps {
@@ -184,26 +96,33 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
   const [overallProgressDisplay, setOverallProgressDisplay] = useState(0); // For the main progress bar
 
   const setupStartedRef = useRef(false);
+  const hasCompletionBeenHandledRef = useRef(false); // For navigation fix
 
-  // Map phases to display names (moved to component scope)
-  const phaseNames: {[key in SetupPhase]: string} = {
+  // Map phases to display names
+  const phaseNames: { [key in SetupPhase]: string } = {
     checking: 'System Check',
-    installing_comfyui: 'ComfyUI Setup',
+    installing_comfyui: 'ComfyUI Setup', // Retained for type completeness, though not in active display order
     python_setup: 'Python Setup',
-    installing_custom_nodes: 'Custom Node Setup', // Added missing phase name
+    installing_custom_nodes: 'Custom Nodes',
+    verifying_dependencies: 'Verifying Setup', // Added new phase
     downloading_models: 'Model Downloads',
     finalizing: 'Finalizing',
     complete: 'Complete',
     error: 'Error'
   };
 
-  // Calculate overall progress percentage (adapted from existing)
+  // Calculate overall progress percentage
   const calculateOverallProgress = useCallback(() => {
     const weights: {[key in SetupPhase]?: number} = {
-      checking: 5, installing_comfyui: 25, python_setup: 20, // Adjusted weights
-      downloading_models: 45, finalizing: 5
+      checking: 5,
+      python_setup: 20,
+      installing_custom_nodes: 20,
+      verifying_dependencies: 10,
+      downloading_models: 40,
+      finalizing: 5
+      // 'installing_comfyui' is removed from weighted phases
     };
-    const phaseOrder: SetupPhase[] = ['checking', 'installing_comfyui', 'python_setup', 'downloading_models', 'finalizing'];
+    const phaseOrder: SetupPhase[] = ['checking', 'python_setup', 'installing_custom_nodes', 'verifying_dependencies', 'downloading_models', 'finalizing'];
     const currentPhaseIndex = phaseOrder.indexOf(setupProgress.phase);
 
     if (setupProgress.phase === 'complete') return 100;
@@ -324,30 +243,39 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
             setSetupProgress(prev => {
               const currentPhaseIndex = phaseDisplayOrder.indexOf(prev.phase);
               const receivedPhaseIndex = phaseDisplayOrder.indexOf(payload.phase);
- 
-              // Only update if the received phase is the same as or comes after the current phase
-              if (receivedPhaseIndex >= currentPhaseIndex || payload.phase === 'error') {
-                 console.log(`[SetupScreen] Updating progress to phase: ${payload.phase}, progress: ${payload.progress}`);
-                return payload;
-              } else {
-                 console.log(`[SetupScreen] Ignoring progress update for earlier phase: ${payload.phase}. Current phase: ${prev.phase}`);
-                return prev; // Ignore update for earlier phase
-              }
-            });
-            console.log(`[SetupScreen] Current phase after setSetupProgress: ${payload.phase}`); // Log updated phase
 
-            if (payload.phase === 'complete') {
-              console.log('[SetupScreen] Condition (payload.phase === "complete") is TRUE.');
-              if (typeof onComplete === 'function') {
-                console.log('[SetupScreen] onComplete is a function. Calling onComplete().');
-                onComplete();
-                console.log('[SetupScreen] onComplete() has been called.');
+              let newProgress = prev;
+              // Update if:
+              // 1. The new phase is 'complete' or 'error'.
+              // 2. Or, the new phase is the same as the current phase (allowing updates to step/detail/progress within the same phase).
+              // 3. Or, the new phase is a subsequent phase in the display order.
+              if (payload.phase === 'complete' || payload.phase === 'error' ||
+                  (receivedPhaseIndex !== -1 && receivedPhaseIndex >= currentPhaseIndex)
+              ) {
+                // If the phase is the same or later (or special 'complete'/'error'), accept the new payload.
+                // This ensures that changes to currentStep, detailMessage, or progress within the same phase are reflected.
+                console.log(`[SetupScreen] Updating progress. New: phase=${payload.phase}, step='${payload.currentStep}', prog=${payload.progress}, detail='${payload.detailMessage}'. Prev: phase=${prev.phase}, step='${prev.currentStep}', prog=${prev.progress}, detail='${prev.detailMessage}'`);
+                newProgress = payload;
               } else {
-                console.error('[SetupScreen] onComplete is NOT a function! Type:', typeof onComplete);
+                console.log(`[SetupScreen] Ignoring progress update (phase out of order). Received: ${payload.phase} (${payload.progress}%) (idx ${receivedPhaseIndex}). Current: ${prev.phase} (${prev.progress}%) (idx ${currentPhaseIndex}).`);
               }
-            } else {
-              // console.log(`[SetupScreen] Condition (payload.phase === "complete") is FALSE. Current phase: ${payload.phase}`);
-            }
+              
+              // Navigation fix: Call onComplete only once when transitioning to 'complete'
+              if (newProgress.phase === 'complete' && !hasCompletionBeenHandledRef.current) {
+                if (typeof onComplete === 'function') {
+                  console.log('[SetupScreen] Transitioning to complete state. Calling onComplete().');
+                  onComplete();
+                  hasCompletionBeenHandledRef.current = true; // Mark as handled
+                  console.log('[SetupScreen] onComplete() has been called and completion handled.');
+                } else {
+                  console.error('[SetupScreen] onComplete is NOT a function! Type:', typeof onComplete);
+                }
+              } else if (newProgress.phase === 'complete' && hasCompletionBeenHandledRef.current) {
+                console.log('[SetupScreen] Completion already handled, not calling onComplete again for phase:', newProgress.phase);
+              }
+              return newProgress;
+            });
+            // console.log(`[SetupScreen] Current phase after setSetupProgress: ${payload.phase}`); // Log updated phase, be careful with stale closures here
           } catch (error) {
             console.error('[SetupScreen] Error inside setup-progress listener:', error);
             setSetupProgress(prev => ({
@@ -503,9 +431,10 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       setSetupProgress({ phase: 'checking', currentStep: 'Retrying setup...', progress: 0, detailMessage: 'Attempting to restart setup process...' });
-      // setModels([]); // Reset models - Commented out
-      setCustomNodeInstallState(initialCustomNodeInstallState); // Reset custom node state
-      setupStartedRef.current = false; // Allow setup to start again
+      // setModels([]); // Reset models
+      setCustomNodeInstallState(initialCustomNodeInstallState);
+      setupStartedRef.current = false;
+      hasCompletionBeenHandledRef.current = false; // Reset completion handler on retry
       await invoke('retry_application_setup');
     } catch (error) {
       console.error('[SetupScreen] Retry command failed:', error);
@@ -514,7 +443,7 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
     }
   };
   
-  const phaseDisplayOrder: SetupPhase[] = ['checking', 'installing_comfyui', 'python_setup', 'downloading_models', 'finalizing'];
+  const phaseDisplayOrder: SetupPhase[] = ['checking', 'python_setup', 'installing_custom_nodes', 'verifying_dependencies', 'downloading_models', 'finalizing'];
   const currentPhaseVisualIndex = phaseDisplayOrder.indexOf(setupProgress.phase);
 
   return (
@@ -522,187 +451,40 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
       <style>{styles}</style>
       <div className="min-h-screen w-screen bg-gradient-to-br from-purple-50 via-white to-pink-50 flex flex-col items-center justify-center p-6">
         <div className="w-full max-w-3xl">
-          <div className="mb-8 text-center">
-            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-700 to-pink-600 mb-2">
-              Setting Up Metamorphosis
-            </h1>
-            <p className="text-gray-600 mb-4">
-              Please wait while we prepare your experience
-            </p>
-            <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden relative">
-              <div 
-                className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300 ease-out absolute"
-                style={{ width: `${overallProgressDisplay}%` }}
-              ></div>
-              <div className="absolute inset-0 animate-shimmer"></div>
-            </div>
-            <p className="text-sm text-gray-500 mt-1">
-              Overall Progress: {overallProgressDisplay}%
-            </p>
-          </div>
+          <SetupOverallProgressDisplay overallProgressDisplay={overallProgressDisplay} />
           
           <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-            <div className="bg-gray-50 px-6 py-4 border-b border-gray-100">
-              <div className="flex flex-wrap justify-between gap-4">
-                {phaseDisplayOrder.map((phase, index) => {
-                  const isComplete = index < currentPhaseVisualIndex;
-                  const isActive = index === currentPhaseVisualIndex && setupProgress.phase !== 'complete' && setupProgress.phase !== 'error';
-                  
-                  return (
-                    <div 
-                      key={phase}
-                      className={`flex items-center ${
-                        isComplete ? 'text-green-600' : 
-                        isActive ? 'text-purple-700' : 
-                        'text-gray-400'
-                      }`}
-                    >
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                        isComplete ? 'bg-green-100' : 
-                        isActive ? 'bg-purple-100' : 
-                        'bg-gray-100'
-                      }`}>
-                        <PhaseIcon phase={phase} />
-                      </div>
-                      <span className={`ml-2 text-sm font-medium ${
-                        isComplete ? 'text-green-800' : 
-                        isActive ? 'text-purple-900' : 
-                        'text-gray-500'
-                      }`}>
-                        {phaseNames[phase]}
-                      </span>
-                      {index < phaseDisplayOrder.length - 1 && (
-                        <div className={`w-8 h-px mx-1 ${
-                          index < currentPhaseVisualIndex ? 'bg-green-400' : 'bg-gray-200'
-                        }`}></div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <SetupPhaseTracker
+              phaseDisplayOrder={phaseDisplayOrder}
+              currentPhaseVisualIndex={currentPhaseVisualIndex}
+              setupProgress={setupProgress}
+              phaseNames={phaseNames}
+            />
             
             <div className="p-6">
-              <div className="mb-6">
-                <h2 className="text-lg font-semibold text-gray-800">
-                  {setupProgress.currentStep}
-                </h2>
-                <p className="text-gray-600 mt-1">
-                  {setupProgress.detailMessage}
-                </p>
-              </div>
+              <SetupStepDetailsDisplay
+                currentStep={setupProgress.currentStep}
+                detailMessage={setupProgress.detailMessage}
+              />
               
-              {setupProgress.phase !== 'complete' && setupProgress.phase !== 'error' && setupProgress.phase !== 'downloading_models' && (
-                <div className="bg-gray-50 rounded-lg p-4 mb-6">
-                  <h3 className="text-md font-semibold text-gray-700 mb-3">Current Phase Progress</h3>
-                  <div className="flex justify-between mb-2">
-                    <span className="text-sm font-medium text-gray-700">Current Step Progress</span>
-                    <span className="text-sm font-medium text-purple-700">
-                      {Math.round(setupProgress.progress)}%
-                    </span>
-                  </div>
-                  <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-purple-600 transition-all duration-300 ease-out"
-                      style={{ width: `${setupProgress.progress}%` }}
-                    ></div>
-                  </div>
-                </div>
-              )}
+              <SetupCurrentPhaseProgress setupProgress={setupProgress} />
 
-              {/* Custom Node Installation Status Display */}
               {(setupProgress.phase === 'python_setup' || setupProgress.phase === 'installing_custom_nodes') && (
                 <SetupCustomNodeInstallerStatus installState={customNodeInstallState} />
               )}
               
-              {/* Render SetupModelDownloader when in the downloading_models phase */}
               {setupProgress.phase === 'downloading_models' && (
                 <div className="mt-4">
                   <SetupModelDownloader />
                 </div>
               )}
               
-              {/* Old model download UI section commented out */}
-              {/* {setupProgress.phase === 'downloading_models' && models.length > 0 && (
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <h3 className="font-medium text-gray-700 mb-3">Model Downloads</h3>
-                  <div className="space-y-4">
-                    {models.map(model => (
-                      <div key={model.id} className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-medium text-gray-800">{model.name}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${
-                            model.status === 'completed' ? 'bg-green-100 text-green-800' :
-                            model.status === 'downloading' ? 'bg-blue-100 text-blue-800' :
-                            'bg-gray-100 text-gray-800'
-                          }`}>
-                            {model.status === 'completed' ? 'Complete' :
-                             model.status === 'downloading' ? `Downloading ${Math.round(model.progress)}%` :
-                             model.status === 'error' ? `Error: ${model.errorMessage || 'Failed'}` :
-                             'Queued'}
-                          </span>
-                        </div>
-                        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full ${
-                              model.status === 'completed' ? 'bg-green-500' :
-                              model.status === 'downloading' ? 'bg-blue-500' :
-                              model.status === 'error' ? 'bg-red-500' :
-                              'bg-gray-300'
-                            } transition-all duration-300 ease-out`}
-                            style={{ width: `${model.progress}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )} */}
-              
               {setupProgress.phase === 'complete' && (
-                <div className="bg-green-50 rounded-lg p-6 text-center">
-                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 text-green-500 mb-4">
-                    <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                  <h3 className="text-xl font-semibold text-green-800 mb-2">Setup Complete!</h3>
-                  <p className="text-green-600">
-                    Metamorphosis is ready to use.
-                    {typeof onComplete === 'function' ? " Click 'Start Game' to proceed." : " Preparing to transition..."}
-                  </p>
-                  <div className="mt-6 inline-block">
-                    <div className="relative">
-                      <div className="absolute -inset-4 rounded-full bg-green-200 opacity-30 animate-pulse-ring"></div>
-                      <button 
-                        onClick={onComplete}
-                        className="relative z-10 bg-green-600 text-white px-6 py-2 rounded-full font-medium hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
-                      >
-                        Start Game
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <SetupCompletionDisplay onComplete={onComplete} />
               )}
 
               {setupProgress.phase === 'error' && (
-                <div className="bg-red-50 rounded-lg p-6 text-center">
-                   <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-100 text-red-500 mb-4">
-                    <svg className="w-10 h-10" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <h3 className="text-xl font-semibold text-red-800 mb-2">Setup Error</h3>
-                  <p className="text-red-600 mb-4">
-                    An error occurred during setup: {setupProgress.error || 'Unknown error.'}
-                  </p>
-                  <button 
-                    onClick={handleRetry}
-                    className="bg-red-600 text-white px-6 py-2 rounded-full font-medium hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-                  >
-                    Retry Setup
-                  </button>
-                </div>
+                <SetupErrorDisplay error={setupProgress.error} handleRetry={handleRetry} />
               )}
             </div>
             

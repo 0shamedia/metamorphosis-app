@@ -1,5 +1,6 @@
 // metamorphosis-app/src-tauri/src/setup_manager/types.rs
 use serde::Serialize;
+use serde::Deserialize;
 
 // Unified Setup Progress Payload
 #[derive(Serialize, Clone, Debug)]
@@ -47,6 +48,29 @@ pub struct ModelInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)] // Added Deserialize and PartialEq, Eq
+pub enum ModelType {
+    Checkpoint,
+    VAE,
+    LoRA,
+    CLIPVision,
+    IPAdapter,
+    ControlNet,
+    Upscaler, // Example, adjust as needed
+    SAM,
+    Ultralytics,
+    InsightFace, // General category for .onnx models for insightface if not fitting others
+    Archive, // For .zip files needing extraction
+    Generic, // Default or for models not fitting other categories
+}
+
+impl Default for ModelType {
+    fn default() -> Self {
+        ModelType::Generic
+    }
+}
+
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "type", content = "data")]

@@ -12,7 +12,7 @@ use super::process_handler::{spawn_comfyui_process as internal_spawn_comfyui_pro
 use super::health_checker::{perform_comfyui_health_check, monitor_comfyui_health}; // monitor_comfyui_health is started by perform_comfyui_health_check
 
 // Crate-level imports
-use crate::dependency_management::{self}; // For install_python_dependencies_with_progress
+use crate::setup_manager::dependency_manager; // For install_python_dependencies_with_progress
 use crate::setup; // For emit_setup_progress
 
 // Tauri command to ensure dependencies are installed and sidecar is started
@@ -21,8 +21,8 @@ pub async fn ensure_backend_ready(app_handle: AppHandle<Wry>) -> Result<(), Stri
     log::error!("[EARLY_CALL_DEBUG] ensure_backend_ready INVOKED");
     info!("Ensuring backend is ready...");
     emit_backend_status(&app_handle, "checking_dependencies", "Checking backend dependencies...".to_string(), false);
-
-    match dependency_management::install_python_dependencies_with_progress(&app_handle).await {
+ 
+    match dependency_manager::install_python_dependencies_with_progress(&app_handle).await {
         Ok(_) => {
             info!("Dependency check/installation complete.");
         }

@@ -20,8 +20,8 @@ use crate::setup_manager::python_utils::{
 };
 use crate::setup_manager::{get_core_models_list, download_and_place_models}; // Uncommented and added functions
 use crate::setup_manager::custom_node_management; // Uncommented and added custom_node_management
-use crate::dependency_management; // Uncommented and added dependency_management
-
+use crate::setup_manager::dependency_manager; // Changed from crate::dependency_management
+ 
 // Note: comfyui_sidecar is kept as crate level for now.
 // If it is also refactored into managers, these paths would change.
 // use crate::comfyui_sidecar; // Removed direct import
@@ -191,7 +191,7 @@ async fn orchestrate_full_setup(app_handle: AppHandle<Wry>) -> Result<(), String
          }
          Ok(false) => {
              info!("[SETUP_ORCHESTRATION] Python environment verification failed. Proceeding with installation.");
-             match dependency_management::install_python_dependencies_with_progress(&app_handle).await {
+             match dependency_manager::install_python_dependencies_with_progress(&app_handle).await {
                  Ok(_) => {
                      info!("Python dependencies installed successfully.");
                  }
@@ -261,25 +261,101 @@ async fn orchestrate_full_setup(app_handle: AppHandle<Wry>) -> Result<(), String
               warn!("Continuing setup despite ComfyUI-Impact-Pack failing: {}", e);
           }
       }
- 
+  
       // Install ComfyUI-Impact-Subpack
       info!("[SETUP_ORCHESTRATION] Attempting to clone ComfyUI-Impact-Subpack...");
       match custom_node_management::clone_comfyui_impact_subpack(&app_handle).await {
           Ok(_) => {
               info!("ComfyUI-Impact-Subpack cloned successfully or already exists and dependencies checked/installed.");
-              emit_setup_progress(&app_handle, "installing_custom_nodes", "Impact Subpack Setup Complete", 100, Some("ComfyUI-Impact-Subpack processed. Custom node setup finished.".to_string()), None);
+              emit_setup_progress(&app_handle, "installing_custom_nodes", "Impact Subpack Setup Complete", 80, Some("ComfyUI-Impact-Subpack processed.".to_string()), None); // Adjusted progress
           }
           Err(e) => {
               let err_msg = format!("Failed to setup ComfyUI-Impact-Subpack: {}", e);
               error!("{}", err_msg);
-              emit_setup_progress(&app_handle, "installing_custom_nodes", "Impact Subpack Setup Failed", 85, Some(err_msg.clone()), Some(e.to_string()));
+              emit_setup_progress(&app_handle, "installing_custom_nodes", "Impact Subpack Setup Failed", 75, Some(err_msg.clone()), Some(e.to_string())); // Adjusted progress
               warn!("Continuing setup despite ComfyUI-Impact-Subpack failing: {}", e);
-               // Still emit 100% for the phase to move on, but with a warning logged.
-              emit_setup_progress(&app_handle, "installing_custom_nodes", "Custom Node Setup Finished (with warnings)", 100, Some("Custom node setup finished, but some optional nodes may have failed.".to_string()), None);
           }
       }
-      // End of Installing Custom Nodes Phase
   
+      // Install ComfyUI_smZNodes
+      info!("[SETUP_ORCHESTRATION] Attempting to clone ComfyUI_smZNodes...");
+      match custom_node_management::clone_comfyui_smz_nodes(&app_handle).await {
+          Ok(_) => {
+              info!("ComfyUI_smZNodes cloned successfully or already exists.");
+              emit_setup_progress(&app_handle, "installing_custom_nodes", "smZNodes Setup Complete", 85, Some("ComfyUI_smZNodes processed.".to_string()), None);
+          }
+          Err(e) => {
+              let err_msg = format!("Failed to setup ComfyUI_smZNodes: {}", e);
+              error!("{}", err_msg);
+              emit_setup_progress(&app_handle, "installing_custom_nodes", "smZNodes Setup Failed", 80, Some(err_msg.clone()), Some(e.to_string()));
+              warn!("Continuing setup despite ComfyUI_smZNodes failing: {}", e);
+          }
+      }
+  
+      // Install ComfyUI_InstantID
+      info!("[SETUP_ORCHESTRATION] Attempting to clone ComfyUI_InstantID...");
+      match custom_node_management::clone_comfyui_instantid(&app_handle).await {
+          Ok(_) => {
+              info!("ComfyUI_InstantID cloned successfully or already exists and dependencies checked/installed.");
+              emit_setup_progress(&app_handle, "installing_custom_nodes", "InstantID Setup Complete", 90, Some("ComfyUI_InstantID processed.".to_string()), None);
+          }
+          Err(e) => {
+              let err_msg = format!("Failed to setup ComfyUI_InstantID: {}", e);
+              error!("{}", err_msg);
+              emit_setup_progress(&app_handle, "installing_custom_nodes", "InstantID Setup Failed", 85, Some(err_msg.clone()), Some(e.to_string()));
+              warn!("Continuing setup despite ComfyUI_InstantID failing: {}", e);
+          }
+      }
+  
+      // Install ComfyUI-IC-Light
+      info!("[SETUP_ORCHESTRATION] Attempting to clone ComfyUI-IC-Light...");
+      match custom_node_management::clone_comfyui_ic_light(&app_handle).await {
+          Ok(_) => {
+              info!("ComfyUI-IC-Light cloned successfully or already exists.");
+              emit_setup_progress(&app_handle, "installing_custom_nodes", "IC-Light Setup Complete", 95, Some("ComfyUI-IC-Light processed.".to_string()), None);
+          }
+          Err(e) => {
+              let err_msg = format!("Failed to setup ComfyUI-IC-Light: {}", e);
+              error!("{}", err_msg);
+              emit_setup_progress(&app_handle, "installing_custom_nodes", "IC-Light Setup Failed", 90, Some(err_msg.clone()), Some(e.to_string()));
+              warn!("Continuing setup despite ComfyUI-IC-Light failing: {}", e);
+          }
+      }
+      
+      // Install rgthree-comfy (optional, standard clone)
+      info!("[SETUP_ORCHESTRATION] Attempting to clone rgthree-comfy...");
+      match custom_node_management::clone_rgthree_comfy_nodes(&app_handle).await {
+          Ok(_) => {
+              info!("rgthree-comfy cloned successfully or already exists.");
+              // No specific progress step for this optional one, phase completion below will cover it.
+          }
+          Err(e) => {
+              let err_msg = format!("Failed to setup rgthree-comfy: {}", e);
+              error!("{}", err_msg);
+              // Log warning, but don't emit a specific error progress step for this optional node.
+              warn!("Continuing setup despite rgthree-comfy failing: {}", e);
+          }
+      }
+    
+      // Install ComfyUI-CLIPSeg
+      info!("[SETUP_ORCHESTRATION] Attempting to clone ComfyUI-CLIPSeg...");
+      match custom_node_management::clone_comfyui_clipseg(&app_handle).await {
+          Ok(_) => {
+              info!("ComfyUI-CLIPSeg cloned successfully or already exists.");
+              // No specific progress step, covered by phase completion
+          }
+          Err(e) => {
+              let err_msg = format!("Failed to setup ComfyUI-CLIPSeg: {}", e);
+              error!("{}", err_msg);
+              // Log warning, but don't emit a specific error progress step for this node.
+              warn!("Continuing setup despite ComfyUI-CLIPSeg failing: {}", e);
+          }
+      }
+  
+      // Final progress for custom node phase
+      emit_setup_progress(&app_handle, "installing_custom_nodes", "Custom Node Setup Finished", 100, Some("Custom node setup finished. Some optional nodes may have warnings if they failed.".to_string()), None);
+      // End of Installing Custom Nodes Phase
+   
        // Phase 3.5: Verification of Custom Nodes and Dependencies
       emit_setup_progress(&app_handle, "verifying_dependencies", "Verifying installations", 0, Some("Verifying custom node and Python package installations...".to_string()), None);
      

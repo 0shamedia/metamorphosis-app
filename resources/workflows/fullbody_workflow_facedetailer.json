@@ -1,7 +1,7 @@
 {
   "1": {
     "inputs": {
-      "ckpt_name": "nova3DCGXL_illustriousV30.safetensors"
+      "ckpt_name": "Metamorphosis_v3.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {

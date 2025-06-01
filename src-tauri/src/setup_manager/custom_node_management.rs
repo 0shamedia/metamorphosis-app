@@ -29,7 +29,8 @@ use super::python_utils::{
     // get_script_path, // If needed later for script-based checks
 };
 use crate::setup_manager::event_utils::emit_event; // Using the specific emit_event
-use crate::dependency_management::install_custom_node_dependencies; // Added for Impact Pack
+use crate::setup_manager::dependency_manager::install_custom_node_dependencies; // Changed from crate::dependency_management
+use crate::gpu_detection::{get_gpu_info, GpuType}; // Import GPU detection utilities
 
 const IPADAPTER_PLUS_REPO_URL: &str = "https://github.com/cubiq/ComfyUI_IPAdapter_plus.git";
 const IPADAPTER_PLUS_NODE_NAME: &str = "ComfyUI_IPAdapter_plus";
@@ -40,7 +41,25 @@ const IMPACT_PACK_NODE_NAME: &str = "ComfyUI-Impact-Pack";
 const IMPACT_SUBPACK_REPO_URL: &str = "https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git";
 const IMPACT_SUBPACK_NODE_NAME: &str = "ComfyUI-Impact-Subpack";
 
+// New Custom Nodes from architectural doc (verified)
+const SMZ_NODES_REPO_URL: &str = "https://github.com/shiimizu/ComfyUI_smZNodes.git";
+const SMZ_NODES_NODE_NAME: &str = "ComfyUI_smZNodes";
+
+const INSTANTID_REPO_URL: &str = "https://github.com/cubiq/ComfyUI_InstantID.git";
+const INSTANTID_NODE_NAME: &str = "ComfyUI_InstantID";
+
+const IC_LIGHT_REPO_URL: &str = "https://github.com/kijai/ComfyUI-IC-Light.git";
+const IC_LIGHT_NODE_NAME: &str = "ComfyUI-IC-Light";
+
+// rgthree-comfy is optional and doesn't have specific python deps or models, standard clone.
+const RGTHREE_NODES_REPO_URL: &str = "https://github.com/rgthree/rgthree-comfy.git";
+const RGTHREE_NODES_NODE_NAME: &str = "rgthree-comfy";
+
+const COMFYUI_CLIPSEG_REPO_URL: &str = "https://github.com/time-river/ComfyUI-CLIPSeg.git";
+const COMFYUI_CLIPSEG_NODE_NAME: &str = "ComfyUI-CLIPSeg";
+
 const ONNXRUNTIME_PACKAGE: &str = "onnxruntime";
+// TODO: Investigate installing onnxruntime-gpu as per ComfyUI-InstantID README
 const INSIGHTFACE_PACKAGE: &str = "insightface";
 
 const CHECK_ONNX_SCRIPT_NAME: &str = "check_onnx.py";
@@ -379,6 +398,82 @@ pub async fn clone_comfyui_impact_subpack(app_handle: &AppHandle<Wry>) -> Result
     ).await
 }
 
+/// Clones the ComfyUI_smZNodes custom node repository.
+pub async fn clone_comfyui_smz_nodes(app_handle: &AppHandle<Wry>) -> Result<(), String> {
+    clone_custom_node_repo(
+        app_handle,
+        SMZ_NODES_NODE_NAME,
+        SMZ_NODES_REPO_URL,
+        None, // No specific post-clone dependency installation logic beyond standard requirements.txt if present
+    )
+    .await
+}
+
+/// Clones the ComfyUI_InstantID custom node repository and installs its dependencies.
+pub async fn clone_comfyui_instantid(app_handle: &AppHandle<Wry>) -> Result<(), String> {
+    clone_custom_node_repo(
+        app_handle,
+        INSTANTID_NODE_NAME,
+        INSTANTID_REPO_URL,
+        Some(|app_handle_param_ref: &AppHandle<Wry>, node_name_param_ref: &str, pack_dir_param_ref: &Path| {
+            // Create owned versions of all captures needed by the async block
+            let owned_app_handle_for_deps = app_handle_param_ref.clone();
+            let owned_app_handle_for_insightface = app_handle_param_ref.clone();
+            let owned_node_name = node_name_param_ref.to_string();
+            let owned_pack_dir = pack_dir_param_ref.to_path_buf();
+
+            Box::pin(async move {
+                // These owned versions are moved into the async block
+                install_custom_node_dependencies(owned_app_handle_for_deps, owned_node_name, owned_pack_dir).await?;
+                install_insightface_dependencies(owned_app_handle_for_insightface).await
+            })
+        }),
+    )
+    .await
+}
+
+/// Clones the ComfyUI-IC-Light custom node repository.
+pub async fn clone_comfyui_ic_light(app_handle: &AppHandle<Wry>) -> Result<(), String> {
+    clone_custom_node_repo(
+        app_handle,
+        IC_LIGHT_NODE_NAME,
+        IC_LIGHT_REPO_URL,
+        Some(|app_handle_param, node_name_param, pack_dir_param| {
+            // IC-Light might have its own requirements.txt
+            let pack_dir_owned = pack_dir_param.to_path_buf();
+            Box::pin(install_custom_node_dependencies(app_handle_param.clone(), node_name_param.to_string(), pack_dir_owned))
+        })
+    )
+    .await
+}
+
+/// Clones the rgthree-comfy custom node repository.
+pub async fn clone_rgthree_comfy_nodes(app_handle: &AppHandle<Wry>) -> Result<(), String> {
+    clone_custom_node_repo(
+        app_handle,
+        RGTHREE_NODES_NODE_NAME,
+        RGTHREE_NODES_REPO_URL,
+        None, // rgthree-comfy typically doesn't have a requirements.txt
+    )
+    .await
+}
+
+/// Clones the ComfyUI-CLIPSeg custom node repository and installs its dependencies.
+pub async fn clone_comfyui_clipseg(app_handle: &AppHandle<Wry>) -> Result<(), String> {
+    clone_custom_node_repo(
+        app_handle,
+        COMFYUI_CLIPSEG_NODE_NAME,
+        COMFYUI_CLIPSEG_REPO_URL,
+        Some(|app_handle_param, node_name_param, pack_dir_param| {
+            // ComfyUI-CLIPSeg might have its own requirements.txt
+            let pack_dir_owned = pack_dir_param.to_path_buf();
+            Box::pin(install_custom_node_dependencies(app_handle_param.clone(), node_name_param.to_string(), pack_dir_owned))
+        })
+    )
+    .await
+}
+
+
 /// Installs insightface and its dependencies (onnxruntime).
 // Removed comfyui_base_path_arg as it's unused; comfyui_base_path is fetched internally.
 pub async fn install_insightface_dependencies(app_handle: AppHandle<Wry>) -> Result<(), String> { // Changed to take owned AppHandle
@@ -399,15 +494,40 @@ pub async fn install_insightface_dependencies(app_handle: AppHandle<Wry>) -> Res
     // 1. Update pip
     run_pip_command(&app_handle, &python_executable, &["install", "-U", "pip"], "pip", "pip").await?; // Pass reference here
 
-    // 2. Check and install ONNX Runtime
-    let onnx_script_content = "import onnxruntime; print(onnxruntime.__version__)";
-    let is_onnx_installed = execute_python_script_check(&python_executable, onnx_script_content, CHECK_ONNX_SCRIPT_NAME, &comfyui_base_path).await?;
-    if is_onnx_installed {
-        info!("[INSIGHTFACE_SETUP] {} already installed.", ONNXRUNTIME_PACKAGE);
-        emit_event(&app_handle, "PackageAlreadyInstalled", Some(json!({ "packageName": ONNXRUNTIME_PACKAGE }))); // Pass reference here
+    // 2. Check and install ONNX Runtime (conditionally GPU version)
+    let gpu_info = get_gpu_info();
+    info!("[INSIGHTFACE_SETUP] Detected GPU Info: {:?}", gpu_info);
+
+    let onnx_package_to_install: &str;
+    let onnx_package_display_name: String;
+
+    if gpu_info.gpu_type == GpuType::Nvidia && gpu_info.cuda_version.is_some() {
+        // TODO: Confirm exact pip package name for onnxruntime-gpu and if it needs specific CUDA versioning.
+        // For now, assuming "onnxruntime-gpu" is a general package that picks up CUDA.
+        // A more robust solution might involve mapping cuda_version (e.g., "11.8", "12.1") to specific
+        // onnxruntime-gpu wheels if necessary, e.g., onnxruntime-gpu-cuda11, onnxruntime-gpu-cuda12.
+        onnx_package_to_install = "onnxruntime-gpu";
+        onnx_package_display_name = format!("{} (GPU for CUDA {:?})", ONNXRUNTIME_PACKAGE, gpu_info.cuda_version.unwrap_or_default());
+        info!("[INSIGHTFACE_SETUP] Attempting to install ONNX Runtime for GPU (NVIDIA CUDA detected). Package: {}", onnx_package_to_install);
     } else {
-        info!("[INSIGHTFACE_SETUP] Installing {}...", ONNXRUNTIME_PACKAGE);
-        run_pip_command(&app_handle, &python_executable, &["install", "onnxruntime"], ONNXRUNTIME_PACKAGE, "pip").await?; // Pass reference here
+        onnx_package_to_install = "onnxruntime";
+        onnx_package_display_name = ONNXRUNTIME_PACKAGE.to_string();
+        info!("[INSIGHTFACE_SETUP] Attempting to install standard ONNX Runtime (No NVIDIA CUDA detected or GPU is not NVIDIA). Package: {}", onnx_package_to_install);
+    }
+    
+    let onnx_script_content = "import onnxruntime; print(onnxruntime.__version__)";
+    // Check if *any* onnxruntime is installed. If so, assume it's okay for now.
+    // A more advanced check might verify if the *correct* type (CPU/GPU) is installed.
+    let is_onnx_installed = execute_python_script_check(&python_executable, onnx_script_content, CHECK_ONNX_SCRIPT_NAME, &comfyui_base_path).await?;
+    
+    if is_onnx_installed {
+        // TODO: Add a check here to see if the *correct* version (CPU vs GPU) is installed if we want to be more robust.
+        // For now, if any onnxruntime is importable, we skip. This might lead to issues if CPU version is present but GPU is needed.
+        info!("[INSIGHTFACE_SETUP] An ONNX Runtime (version unknown type) already installed. Display Name: {}", onnx_package_display_name);
+        emit_event(&app_handle, "PackageAlreadyInstalled", Some(json!({ "packageName": onnx_package_display_name })));
+    } else {
+        info!("[INSIGHTFACE_SETUP] Installing {}...", onnx_package_display_name);
+        run_pip_command(&app_handle, &python_executable, &["install", onnx_package_to_install], &onnx_package_display_name, "pip").await?;
     }
 
     // 3. Check and install Insightface

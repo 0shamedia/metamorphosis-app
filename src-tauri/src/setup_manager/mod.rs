@@ -12,6 +12,7 @@ pub mod model_downloader;
 pub mod model_orchestrator;
 pub mod custom_node_management; // Added custom_node_management module
 pub mod python_utils;
+pub mod dependency_manager; // Added dependency_manager module
 
 // Re-export key public functions and commands
 pub use orchestration::{
@@ -73,4 +74,10 @@ pub use custom_node_management::{
     clone_comfyui_ipadapter_plus,
     clone_comfyui_impact_pack,
     clone_comfyui_impact_subpack,
+};
+
+// Re-export from dependency_manager
+pub use dependency_manager::{
+    install_python_dependencies_with_progress,
+    install_custom_node_dependencies,
 };

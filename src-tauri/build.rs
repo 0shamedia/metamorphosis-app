@@ -1,502 +1,79 @@
-use std::{
-    env,
-    error::Error,
-    fs::{self, File},
-    io::{self, Cursor},
-    path::{Path, PathBuf},
-};
-use flate2::read::GzDecoder;
-use tar::Archive;
-use zip::ZipArchive;
-use fs_extra::dir::{copy, CopyOptions}; // Import fs_extra copy function and options
+use std::error::Error;
+use std::fs; // Keep fs for potential top-level directory creations if needed
 
-const PYTHON_VERSION: &str = "3.12.10"; // Upgrade to Python 3.12.10
-const PYTHON_RELEASE_TAG: &str = "20250409"; // Use latest valid release tag
-const BASE_URL: &str = "https://github.com/astral-sh/python-build-standalone/releases/download"; // Updated base URL to astral-sh repo
-const VENDOR_DIR: &str = "../vendor"; // Relative to src-tauri
-const PYTHON_INSTALL_DIR_NAME: &str = "python"; // Directory inside vendor where python will be extracted
+// Declare the new module
+mod build_logic;
 
-// Remove the custom copy_recursively function
-// fn copy_recursively(...) { ... }
+// Use items from the new modules
+use build_logic::{paths, python_installer, vendor_copier};
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=build.rs");
-    // Assume ComfyUI source is already in ../vendor/comfyui
-    println!("cargo:rerun-if-changed=../vendor/comfyui/requirements.txt");
+    println!("cargo:rerun-if-changed=build_logic/mod.rs");
+    println!("cargo:rerun-if-changed=build_logic/paths.rs");
+    println!("cargo:warning=BUILD_RS: Rerun if paths.rs changed.");
+    println!("cargo:rerun-if-changed=build_logic/archive_utils.rs");
+    println!("cargo:warning=BUILD_RS: Rerun if archive_utils.rs changed.");
+    println!("cargo:rerun-if-changed=build_logic/python_installer.rs");
+    println!("cargo:warning=BUILD_RS: Rerun if python_installer.rs changed.");
+    println!("cargo:rerun-if-changed=build_logic/vendor_copier.rs");
+    println!("cargo:warning=BUILD_RS: Rerun if vendor_copier.rs changed.");
 
-    let target = env::var("TARGET")?;
-    let out_dir = PathBuf::from(env::var("OUT_DIR")?); // Temp dir for downloads
-    let vendor_path = PathBuf::from(VENDOR_DIR);
-    let python_base_install_path = vendor_path.join(PYTHON_INSTALL_DIR_NAME);
-    let python_root_install_path = python_base_install_path.join("python"); // The actual python install is nested
+    // Assume ComfyUI source is already in ../vendor/comfyui (relative to src-tauri)
+    // This path will be derived more robustly using the paths module.
+    // The rerun-if-changed for requirements.txt should point to the actual source location.
+    // println!("cargo:rerun-if-changed=../vendor/comfyui/requirements.txt"); // Will be handled by source_vendor_dir logic
 
-    // --- 1. Determine Python Download URL ---
-    let (download_url, archive_ext, target_triple_short) = get_python_download_info(&target)?;
-    let archive_filename = format!("python-{}+{}-{}.{}", PYTHON_VERSION, PYTHON_RELEASE_TAG, target_triple_short, archive_ext);
-    let download_path = out_dir.join(&archive_filename);
-    println!("cargo:warning=Calculated Python download URL: {}", download_url); // LOG 1
+    eprintln!("cargo:warning=BUILD_RS_MAIN: Starting build script execution.");
 
-    // --- 2. Create Vendor Directory ---
-    fs::create_dir_all(&vendor_path)?;
-    fs::create_dir_all(&python_base_install_path)?;
-
-    // --- 3. Download Python Runtime (with caching) ---
-    if !python_root_install_path.exists() { // Check if final install dir exists
-        println!("Python not found in vendor directory. Downloading...");
-        if !download_path.exists() {
-            println!("Downloading Python standalone from: {}", download_url);
-            match download_file(&download_url, &download_path) {
-                Ok(_) => {
-                    println!("cargo:warning=Python download successful: {:?}", download_path); // LOG 2 (Success)
-                    println!("Downloaded Python to: {:?}", download_path);
-                }
-                Err(e) => {
-                    println!("cargo:warning=Python download failed: {}", e); // LOG 2 (Failure)
-                    return Err(e);
-                }
-            }
-        } else {
-            println!("Using cached Python download: {:?}", download_path);
-        }
-
-        // --- 4. Extract Python Runtime ---
-        println!("cargo:warning=Target Python extraction directory: {:?}", python_base_install_path); // LOG 3
-        println!("Extracting Python to: {:?}", python_base_install_path);
-        let extract_result = std::panic::catch_unwind(|| {
-            // This closure now returns the Result from extract_archive
-            extract_archive(&download_path, &python_base_install_path, archive_ext) // Remove out_dir
-        });
-
-        match extract_result {
-            Ok(Ok(())) => {
-                println!("cargo:warning=Python extraction successful."); // LOG 4 (Success)
-                println!("Extracted Python successfully.");
-            }
-            Ok(Err(e)) => {
-                // Handle errors returned by extract_archive itself
-                println!("cargo:warning=Python extraction failed: {}", e); // LOG 4 (Failure)
-                eprintln!("Error during Python extraction: {}", e);
-                return Err(e); // Propagate the original error
-            }
-            Err(panic_payload) => {
-                // Handle panics that occurred within extract_archive or the closure
-                println!("cargo:warning=Panic during Python extraction."); // LOG 4 (Panic)
-                eprintln!("\n\n===== PANIC CAUGHT DURING PYTHON EXTRACTION =====");
-                if let Some(s) = panic_payload.downcast_ref::<&str>() {
-                    eprintln!("Panic payload (str): {}", s);
-                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                    eprintln!("Panic payload (String): {}", s);
-                } else {
-                    eprintln!("Panic payload (Unknown type)");
-                }
-                eprintln!("==============================================\n");
-                // Re-panic to ensure the build fails, propagating the panic
-                std::panic::resume_unwind(panic_payload);
-            }
-        }
-
-    } else {
-        println!("Found existing Python installation in: {:?}", python_root_install_path); // Note: This check might be less reliable now if ensurepip fails mid-way on a subsequent run. Consider always cleaning.
-    }
-
-    // --- 5. Verify Python Executable ---
-    // This check is primarily for Windows (python.exe).
-    // For Linux/macOS, it would typically be 'bin/python'.
-    // python_base_install_path is the directory where the archive is extracted.
-    let python_exe_path_windows = python_base_install_path.join("python.exe");
-    let python_exe_path_unix = python_base_install_path.join("bin").join("python");
-
-    if python_exe_path_windows.exists() {
-        println!("cargo:warning=python.exe found at: {:?}", python_exe_path_windows); // LOG 5 (Found Windows)
-    } else if python_exe_path_unix.exists() {
-        println!("cargo:warning=bin/python found at: {:?}", python_exe_path_unix); // LOG 5 (Found Unix)
-    } else {
-        println!("cargo:warning=Python executable NOT found. Checked for python.exe at {:?} and bin/python at {:?}", python_exe_path_windows, python_exe_path_unix); // LOG 5 (Not Found)
-    }
-
-
-    // --- 6. Copy Vendor Directory to Build Output ---
-    eprintln!("cargo:warning=BUILD_RS_STAGE: Starting section 6: Copy Vendor Directory.");
-    println!("Copying vendor directory to build output...");
-    let build_profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string()); // Get build profile (debug/release)
-    eprintln!("cargo:warning=BUILD_RS_STAGE: Determined build profile: {}", build_profile);
-    // --- Determine Paths ---
-    // CARGO_MANIFEST_DIR points to the directory containing the Cargo.toml of the current package (src-tauri)
-    let cargo_manifest_dir = match env::var("CARGO_MANIFEST_DIR") {
-        Ok(p_str) => {
-            eprintln!("cargo:warning=BUILD_RS_STAGE: CARGO_MANIFEST_DIR found: {}", p_str);
-            PathBuf::from(p_str)
-        }
-        Err(e) => {
-            eprintln!("cargo:warning=BUILD_RS_ERROR: CARGO_MANIFEST_DIR not found: {}", e);
-            return Err(Box::new(e));
-        }
-    };
+    // --- 1. Determine Core Paths ---
+    eprintln!("cargo:warning=BUILD_RS_MAIN: Stage 1: Determining Core Paths.");
+    let metamorphosis_app_dir = paths::get_metamorphosis_app_dir()?;
+    let out_dir = paths::get_out_dir()?; // For Python download cache
+    let source_vendor_dir = paths::get_source_vendor_dir(&metamorphosis_app_dir);
     
-    // metamorphosis_app_dir is the root of the Tauri application (e.g., metamorphosis-app/)
-    // It's the parent of src-tauri/
-    let metamorphosis_app_dir = match cargo_manifest_dir.parent() {
-        Some(p) => {
-            eprintln!("cargo:warning=BUILD_RS_STAGE: Parent of CARGO_MANIFEST_DIR (metamorphosis_app_dir) found: {:?}", p);
-            p.to_path_buf()
-        }
-        None => {
-            let err_msg = format!("Failed to get parent of CARGO_MANIFEST_DIR: {:?}", cargo_manifest_dir);
-            eprintln!("cargo:warning=BUILD_RS_ERROR: {}", err_msg);
-            return Err(err_msg.into());
-        }
-    };
-
-    // Source path for the vendor directory (e.g., metamorphosis-app/vendor/)
-    let absolute_vendor_path = metamorphosis_app_dir.join("vendor");
-    eprintln!("cargo:warning=BUILD_RS_STAGE: Calculated absolute_vendor_path (source): {:?}", absolute_vendor_path);
-
-    // Destination path for the vendor directory within the final build target
-    // e.g., metamorphosis-app/target/debug/vendor/ or metamorphosis-app/target/release/vendor/
-    let project_target_root_dir = metamorphosis_app_dir.join("target");
-    let dest_vendor_path_base = project_target_root_dir.join(&build_profile); // build_profile is "debug" or "release"
-    let dest_vendor_path = dest_vendor_path_base.join("vendor");
-    eprintln!("cargo:warning=BUILD_RS_STAGE: Calculated dest_vendor_path (destination): {:?}", dest_vendor_path);
-
-    println!("DEBUG: Source vendor path (build.rs): {:?}", &absolute_vendor_path);
-    println!("DEBUG: Destination vendor path calculated by build.rs: {:?}", &dest_vendor_path);
-    
-    // The copy_recursively function will create the destination directory if it doesn't exist.
-    // We ensure its parent exists here for clarity and to catch potential issues earlier.
-    if let Some(parent_dir) = dest_vendor_path.parent() {
-        eprintln!("cargo:warning=BUILD_RS_STAGE: Ensuring parent of dest_vendor_path exists: {:?}", parent_dir);
-        if let Err(e) = fs::create_dir_all(parent_dir) {
-            let err_msg = format!("Failed to create parent directory for dest_vendor_path {:?}: {}", parent_dir, e);
-            eprintln!("cargo:warning=BUILD_RS_ERROR: {}", err_msg);
-            return Err(err_msg.into());
-        }
-        eprintln!("cargo:warning=BUILD_RS_STAGE: Parent directory ensured/created.");
+    // Ensure the source vendor directory exists before trying to use it.
+    // python_installer and vendor_copier will handle their specific subdirectories.
+    if !source_vendor_dir.exists() {
+        eprintln!("cargo:warning=BUILD_RS_MAIN: Source vendor directory {:?} does not exist. Creating it.", source_vendor_dir);
+        fs::create_dir_all(&source_vendor_dir)
+            .map_err(|e| format!("Failed to create source vendor directory {:?}: {}", source_vendor_dir, e))?;
+    }
+    // For `rerun-if-changed` on `requirements.txt`
+    let source_comfyui_requirements = source_vendor_dir.join("comfyui").join("requirements.txt");
+    if source_comfyui_requirements.exists() {
+        println!("cargo:rerun-if-changed={}", source_comfyui_requirements.display());
+        eprintln!("cargo:warning=BUILD_RS_MAIN: Watching source requirements.txt: {:?}", source_comfyui_requirements);
     } else {
-        eprintln!("cargo:warning=BUILD_RS_WARN: Could not get parent of dest_vendor_path: {:?}", dest_vendor_path);
-        // Potentially return an error here if this is critical
-    }
-    
-    // Attempt to remove the destination directory before copying to avoid permission/lock issues
-
-
-    println!("Source vendor path (absolute): {:?}", &absolute_vendor_path);
-    eprintln!("cargo:warning=BUILD_RS_DEBUG: Source vendor path (absolute): {:?}", &absolute_vendor_path);
-    println!("Destination vendor path (absolute): {:?}", &dest_vendor_path);
-    eprintln!("cargo:warning=BUILD_RS_DEBUG: Destination vendor path (absolute): {:?}", &dest_vendor_path);
-
-    // --- Diagnostic: Check if source vendor/comfyui exists ---
-    let source_comfyui_path_check = absolute_vendor_path.join("comfyui");
-    eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Checking if source vendor/comfyui exists: {:?}", &source_comfyui_path_check);
-    if source_comfyui_path_check.exists() {
-        eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Source vendor/comfyui FOUND.");
-    } else {
-        eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Source vendor/comfyui NOT FOUND.");
-    }
-    // --- End Diagnostic ---
-
-    // --- Diagnostic: List Source Vendor Contents ---
-    std::thread::sleep(std::time::Duration::from_secs(1)); // Add delay after manual cleanup
-    eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Listing contents of source vendor directory: {:?}", &absolute_vendor_path);
-    match fs::read_dir(&absolute_vendor_path) {
-        Ok(entries) => {
-            eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Found entries in source vendor directory:");
-            for entry_result in entries {
-                match entry_result {
-                    Ok(entry) => eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC:   - {:?}", entry.path()),
-                    Err(e) => eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC:   - Error reading entry: {}", e),
-                }
-            }
-        }
-        Err(e) => eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Error reading source vendor directory: {}", e),
-    }
-
-    // --- Diagnostic: List Source Vendor/ComfyUI Contents ---
-    std::thread::sleep(std::time::Duration::from_secs(1)); // Add delay after listing vendor
-    let source_comfyui_path = absolute_vendor_path.join("comfyui");
-    eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Listing contents of source vendor/comfyui directory: {:?}", &source_comfyui_path);
-    match fs::read_dir(&source_comfyui_path) {
-        Ok(entries) => {
-            eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Found entries in source vendor/comfyui directory:");
-            for entry_result in entries {
-                match entry_result {
-                    Ok(entry) => eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC:   - {:?}", entry.path()),
-                    Err(e) => eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC:   - Error reading entry: {}", e),
-                }
-            }
-        }
-        Err(e) => eprintln!("cargo:warning=BUILD_RS_DIAGNOSTIC: Error reading source vendor/comfyui directory: {}", e),
+        eprintln!("cargo:warning=BUILD_RS_MAIN: Source requirements.txt not found at {:?}, not watching.", source_comfyui_requirements);
     }
 
 
-    // Use fs_extra::dir::copy for recursive directory copying
-    println!("Using fs_extra::dir::copy for recursive directory copying...");
-    std::thread::sleep(std::time::Duration::from_secs(1)); // Add delay before copy
-    eprintln!("cargo:warning=BUILD_RS_INFO: Attempting vendor directory copy from {:?} to {:?}", &absolute_vendor_path, &dest_vendor_path);
-    let mut options = CopyOptions::new();
-    options.overwrite = true; // Overwrite existing files
-    options.copy_inside = true; // Copy the contents of the source directory, not the directory itself
+    // --- 2. Ensure Python is Installed in Source Vendor ---
+    eprintln!("cargo:warning=BUILD_RS_MAIN: Stage 2: Ensuring Python is installed in source vendor directory.");
+    python_installer::ensure_python_installed(&source_vendor_dir, &out_dir)
+        .map_err(|e| format!("Python installation failed: {}", e))?;
+    eprintln!("cargo:warning=BUILD_RS_MAIN: Python installation in source vendor directory ensured.");
 
-    eprintln!("cargo:warning=BUILD_RS_STAGE: Attempting fs_extra::dir::copy from {:?} to {:?}", &absolute_vendor_path, &dest_vendor_path);
-    match copy(&absolute_vendor_path, &dest_vendor_path, &options) {
-        Ok(_) => eprintln!("cargo:warning=BUILD_RS_INFO: Vendor directory copy reported successful by fs_extra::dir::copy."),
-        Err(e) => {
-            eprintln!("cargo:warning=BUILD_RS_ERROR: Vendor directory copy FAILED with error: {}", e);
-            return Err(Box::new(e)); // Make this error fatal to the build script
-        }
-    }
-    eprintln!("cargo:warning=BUILD_RS_INFO: Vendor directory copy attempt finished (check success/failure above).");
 
-    // --- Verification after copy ---
-    let check_comfyui_dir_dest = dest_vendor_path.join("comfyui");
-    println!("cargo:warning=BUILD_RS_VERIFY_DIR: Checking for existence of copied directory: {:?}", check_comfyui_dir_dest);
-    if !check_comfyui_dir_dest.is_dir() { // Check if it's a directory
-        let source_comfyui_dir = absolute_vendor_path.join("comfyui");
-        panic!(
-            "CRITICAL BUILD ERROR: comfyui directory was NOT copied (or is not a dir) to target vendor directory.\n\
-             Checked path: {:?}\n\
-             Source path: {:?}\n\
-             Absolute vendor source: {:?}\n\
-             Destination vendor target: {:?}",
-            check_comfyui_dir_dest,
-            source_comfyui_dir,
-            absolute_vendor_path,
-            dest_vendor_path
-        );
-    } else {
-        println!("cargo:warning=BUILD_RS_VERIFY_DIR_SUCCESS: comfyui directory WAS successfully copied and is a directory at {:?}", check_comfyui_dir_dest);
-        // Further check for main.py inside it
-        let check_main_py = check_comfyui_dir_dest.join("main.py");
-        if !check_main_py.exists() {
-            panic!("CRITICAL BUILD ERROR: comfyui/main.py exists in source but NOT in target vendor directory after copy. Target main.py path: {:?}", check_main_py);
-        } else {
-            println!("cargo:warning=BUILD_RS_VERIFY_MAIN_PY_SUCCESS: comfyui/main.py also exists in target: {:?}", check_main_py);
-        }
-    }
-    // --- End Verification ---
-    
-    // --- Explicitly copy ComfyUI directory --- (SECTION COMMENTED OUT)
-    // This section is suspected to be redundant or causing incorrect nesting (e.g., comfyui/comfyui)
-    // The copy operation on line 256 with `options.copy_inside = true;` should handle copying
-    // the contents of `absolute_vendor_path` (which includes `comfyui`) into `dest_vendor_path`.
-    /*
-    let source_comfyui_path_explicit = absolute_vendor_path.join("comfyui");
-    let dest_comfyui_path_explicit = dest_vendor_path.join("comfyui");
-    eprintln!("cargo:warning=BUILD_RS_STAGE: Attempting explicit fs_extra::dir::copy for ComfyUI from {:?} to {:?}", &source_comfyui_path_explicit, &dest_comfyui_path_explicit);
-    
-    // Ensure destination parent exists (dest_vendor_path already created)
-    if let Some(parent_dir) = dest_comfyui_path_explicit.parent() {
-        if !parent_dir.exists() {
-             eprintln!("cargo:warning=BUILD_RS_WARN: Parent directory for explicit ComfyUI copy did not exist: {:?}", parent_dir);
-             // This shouldn't happen if dest_vendor_path was created, but good defensive check
-             if let Err(e) = fs::create_dir_all(parent_dir) {
-                 let err_msg = format!("Failed to create parent directory for explicit ComfyUI copy {:?}: {}", parent_dir, e);
-                 eprintln!("cargo:warning=BUILD_RS_ERROR: {}", err_msg);
-                 return Err(err_msg.into());
-             }
-             eprintln!("cargo:warning=BUILD_RS_INFO: Parent directory for explicit ComfyUI copy created.");
-        }
-    }
+    // --- 3. Copy Vendor Directories to Build Output ---
+    eprintln!("cargo:warning=BUILD_RS_MAIN: Stage 3: Copying vendor directories to build output.");
+    let target_profile_dir = paths::get_target_profile_dir(&metamorphosis_app_dir)?;
+    let dest_vendor_dir = paths::get_dest_vendor_dir(&target_profile_dir);
 
-    let mut options_explicit = CopyOptions::new();
-    options_explicit.overwrite = true; // Overwrite existing files
-    options_explicit.copy_inside = false; // Copy the directory itself and its contents
+    // Critical: Force use of std::fs for copying due to persistent fs_extra issues.
+    let force_std_fs_copy = true; 
+    eprintln!("cargo:warning=BUILD_RS_MAIN: Forcing std::fs for vendor copy: {}", force_std_fs_copy);
 
-    match copy(&source_comfyui_path_explicit, &dest_comfyui_path_explicit, &options_explicit) {
-        Ok(_) => eprintln!("cargo:warning=BUILD_RS_INFO: Explicit ComfyUI directory copy reported successful by fs_extra::dir::copy."),
-        Err(e) => {
-            eprintln!("cargo:warning=BUILD_RS_ERROR: Explicit ComfyUI directory copy FAILED with error: {}", e);
-            // This is likely a critical error, so we should probably return Err here.
-            return Err(e.into());
-        }
-    }
-    eprintln!("cargo:warning=BUILD_RS_INFO: Explicit ComfyUI directory copy attempt finished (check success/failure above).");
-    */
-    eprintln!("cargo:warning=BUILD_RS_TEST: Reached verification section after copy attempt (explicit ComfyUI copy section commented out).");
+    vendor_copier::copy_vendor_directories(&source_vendor_dir, &dest_vendor_dir, force_std_fs_copy)
+        .map_err(|e| format!("Vendor directory copying failed: {}", e))?;
+    eprintln!("cargo:warning=BUILD_RS_MAIN: Vendor directories copied to build output.");
 
-    // --- Verify requirements.txt exists after copy ---
-    let requirements_dest_path = dest_vendor_path.join("comfyui/requirements.txt");
-    eprintln!("cargo:warning=BUILD_RS_VERIFY_CHECK: Checking for requirements.txt at: {:?}", requirements_dest_path);
-    if requirements_dest_path.exists() {
-        eprintln!("cargo:warning=BUILD_RS_VERIFY_RESULT: requirements.txt FOUND at {:?}", requirements_dest_path);
-    } else {
-        eprintln!("cargo:warning=BUILD_RS_VERIFY_RESULT: requirements.txt NOT FOUND at {:?}. Source was: {:?}", requirements_dest_path, absolute_vendor_path.join("comfyui/requirements.txt"));
-    }
-    // --- End verification ---
-
-    // --- Tauri Build ---
-    println!("Running Tauri build...");
-    eprintln!("cargo:warning=BUILD_RS_STAGE: Starting tauri_build::build().");
+    // --- 4. Tauri Build ---
+    eprintln!("cargo:warning=BUILD_RS_MAIN: Stage 4: Running Tauri build.");
     tauri_build::build();
-    eprintln!("cargo:warning=BUILD_RS_STAGE: tauri_build::build() finished.");
+    eprintln!("cargo:warning=BUILD_RS_MAIN: Tauri build finished.");
 
-    eprintln!("cargo:warning=BUILD_RS_STAGE: main function in build.rs is about to return Ok(()).");
-    Ok(())
-}
-
-fn get_python_download_info(target: &str) -> Result<(String, &'static str, String), Box<dyn Error>> {
-    let (target_triple_short, install_mode, archive_ext) = match target {
-        "x86_64-pc-windows-msvc" => ("x86_64-pc-windows-msvc", "install_only", "tar.gz"), // Switch to install_only tar.gz
-        "aarch64-pc-windows-msvc" => ("aarch64-pc-windows-msvc", "shared-pgo+lto", "zip"),
-        "x86_64-apple-darwin" => ("x86_64-apple-darwin", "install_only", "tar.gz"),
-        "aarch64-apple-darwin" => ("aarch64-apple-darwin", "install_only", "tar.gz"),
-        "x86_64-unknown-linux-gnu" => ("x86_64-unknown-linux-gnu", "install_only", "tar.gz"),
-        // Add other linux targets as needed (e.g., musl)
-        "aarch64-unknown-linux-gnu" => ("aarch64-unknown-linux-gnu", "install_only", "tar.gz"),
-        _ => return Err(format!("Unsupported target: {}", target).into()),
-    };
-
-    let filename_part = format!(
-        "cpython-{}+{}-{}-{}",
-        PYTHON_VERSION, PYTHON_RELEASE_TAG, target_triple_short, install_mode
-    );
-
-    let url = format!(
-        "{}/{}/{}",
-        BASE_URL, PYTHON_RELEASE_TAG, filename_part
-    );
-
-    // Append variant and extension based on OS
-    // Construct the final URL - no '-full' suffix needed for install_only
-    let full_url = format!("{}.{}", url, archive_ext);
-
-    Ok((full_url, archive_ext, filename_part)) // Return filename_part without extension for archive_filename construction
-}
-
-
-fn download_file(url: &str, dest_path: &Path) -> Result<(), Box<dyn Error>> {
-    let response = reqwest::blocking::get(url)?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "Failed to download file: {} (Status: {})",
-            url,
-            response.status()
-        )
-        .into());
-    }
-    let mut dest_file = File::create(dest_path)?;
-    let content = response.bytes()?;
-    io::copy(&mut Cursor::new(content), &mut dest_file)?;
-    Ok(())
-}
-
-fn extract_archive(
-    archive_path: &Path,
-    extract_to: &Path,
-    archive_ext: &str,
-    // _out_dir parameter removed as it's no longer needed
-) -> Result<(), Box<dyn Error>> {
-    let file = File::open(archive_path)?;
-
-    if archive_ext == "zip" {
-        let mut archive = ZipArchive::new(file)?;
-        // Ensure extraction happens directly into the target dir, handling nested 'python' dir if present
-        for i in 0..archive.len() {
-            let mut file = archive.by_index(i)?;
-            let outpath = match file.enclosed_name() {
-                Some(path) => extract_to.join(path), // Use extract_to as base
-                None => continue,
-            };
-
-            if (*file.name()).ends_with('/') {
-                fs::create_dir_all(&outpath)?;
-            } else {
-                if let Some(p) = outpath.parent() {
-                    if !p.exists() {
-                        fs::create_dir_all(&p)?;
-                    }
-                }
-                let mut outfile = fs::File::create(&outpath)?;
-                io::copy(&mut file, &mut outfile)?;
-            }
-             // Set permissions on Unix if needed (omitted for brevity)
-        }
-
-    } else if archive_ext == "tar.gz" {
-        println!("Extracting tar.gz using Rust crates (tar, flate2)...");
-        let tar_gz = File::open(archive_path)?;
-        let tar = GzDecoder::new(tar_gz);
-        let mut archive = Archive::new(tar);
-
-        // Ensure the target directory exists
-        fs::create_dir_all(extract_to)?;
-
-        // Unpack directly into the target directory.
-        // Manually unpack entries and strip the leading 'python/' component
-        for entry_result in archive.entries()? {
-            let mut entry = entry_result?;
-            let owned_path_in_archive = entry.path()?.to_path_buf();
-
-            // Strip the leading 'python/' component to get the path relative to the Python installation root
-            let stripped_path = match owned_path_in_archive.strip_prefix("python") {
-                Ok(p) => p, // e.g., bin/python.exe or Lib/os.py
-                Err(_) => {
-                    // Log a warning and skip this entry if it doesn't start with "python/"
-                    println!(
-                        "cargo:warning=Skipping archive entry: path {:?} does not start with 'python/'.",
-                        owned_path_in_archive
-                    );
-                    continue;
-                }
-            };
-
-            // If stripping "python/" results in an empty path, it means this entry
-            // was for the "python/" directory itself. We can skip creating it explicitly.
-            if stripped_path.as_os_str().is_empty() {
-                continue;
-            }
-
-            // Construct the full destination path for this entry.
-            // `extract_to` is the base Python installation directory (e.g., ../vendor/python).
-            // `stripped_path` is the path relative to that (e.g., bin/python.exe).
-            // So, `dest_path` becomes, e.g., ../vendor/python/bin/python.exe.
-            let dest_path = extract_to.join(stripped_path);
-
-            // Ensure the parent directory for the destination path exists.
-            if let Some(parent_dir) = dest_path.parent() {
-                // Create parent directory if it doesn't exist
-                if !parent_dir.exists() {
-                    fs::create_dir_all(parent_dir).map_err(|e| {
-                        // Provide more context in the error message
-                        std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!(
-                                "Failed to create parent directory {:?} for entry {:?}: {}",
-                                parent_dir, owned_path_in_archive, e
-                            ),
-                        )
-                    })?;
-                }
-            }
-            // Unpack the entry to the destination path
-            entry.unpack(&dest_path).map_err(|e| {
-                // Provide more context in the error message
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to unpack entry {:?} to {:?}: {}", owned_path_in_archive, dest_path, e),
-                )
-            })?;
-        }
-
-        println!("Successfully extracted tar.gz archive using Rust crates (with manual stripping).");
-
-    } else {
-        // Keep zip handling as is
-        return Err(format!("Unsupported archive extension: {}", archive_ext).into());
-    }
-
-    /*
-    let nested_python_dir = extract_to.join("python");
-    if nested_python_dir.is_dir() {
-        println!("Moving extracted contents from {:?} to {:?}", nested_python_dir, extract_to);
-        let mut options = CopyOptions::new();
-        options.content_only = true;
-        options.overwrite = true;
-        copy(&nested_python_dir, extract_to, &options)?;
-        fs::remove_dir_all(&nested_python_dir)?;
-        println!("Successfully moved contents.");
-    }
-    */
-
-
+    eprintln!("cargo:warning=BUILD_RS_MAIN: Build script execution completed successfully.");
     Ok(())
 }

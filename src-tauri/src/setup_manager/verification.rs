@@ -508,7 +508,7 @@ pub async fn check_core_models_exist(app_handle: &AppHandle<Wry>) -> Result<bool
     let mut missing_models = Vec::new();
 
     for model in core_models {
-        let model_path = comfyui_models_base_path.join(&model.target_filename);
+        let model_path = comfyui_models_base_path.join(&model.target_subdir).join(&model.target_filename);
         info!("[VERIFY] Checking for model file: {}", model_path.display());
         if !model_path.exists() || !model_path.is_file() {
             warn!("[VERIFY] MISSING: Model file not found at {}", model_path.display());

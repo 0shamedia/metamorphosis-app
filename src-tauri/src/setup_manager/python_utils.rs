@@ -19,40 +19,71 @@ fn get_base_resource_path(app_handle: &AppHandle<Wry>) -> Result<PathBuf, String
             .ok_or_else(|| "Failed to get parent of CARGO_MANIFEST_DIR for debug base path".to_string())?
             .join("target")                       // .../metamorphosis-app/target
             .join("debug")                        // .../metamorphosis-app/target/debug
-            .canonicalize()
-            .map_err(|e| format!("Failed to canonicalize debug base resource path: {}", e))
+        // Canonicalization is removed/deferred for debug paths as they should be concrete
+        // and to avoid issues if build.rs output isn't immediately visible for canonicalization.
+            .into_ok() // Convert PathBuf to Result<PathBuf, String>
     } else {
+        // Release mode needs canonicalize because resource_dir() can be tricky (e.g. inside ASAR)
         app_handle.path().resource_dir()
-            .map_err(|e| format!("Tauri error getting resource directory: {}", e)) // Changed ok_or_else to map_err
+            .map_err(|e| format!("Tauri error getting resource directory: {}", e))
             .and_then(|p| p.canonicalize().map_err(|e| format!("Failed to canonicalize release resource path: {}", e)))
+    }
+}
+
+trait IntoOk<T, E> {
+    fn into_ok(self) -> Result<T, E>;
+}
+
+impl<T, E: Default> IntoOk<T, E> for T {
+    fn into_ok(self) -> Result<T, E> {
+        Ok(self)
     }
 }
 
 /// Returns the absolute path to the 'vendor' directory.
 pub fn get_vendor_path(app_handle: &AppHandle<Wry>) -> Result<PathBuf, String> {
-    // get_base_resource_path handles debug vs release logic for the base.
-    // build.rs copies vendor to metamorphosis-app/target/[debug|release]/vendor
-    get_base_resource_path(app_handle)?
-        .join("vendor")
-        .canonicalize()
-        .map_err(|e| format!("Failed to canonicalize vendor path: {}", e))
+    let base_path = get_base_resource_path(app_handle)?;
+    let vendor_path = base_path.join("vendor");
+
+    if cfg!(debug_assertions) {
+        // For debug, trust the path construction. Existence is verified by build.rs.
+        // Canonicalization here can fail at runtime if the OS hasn't "settled" the path.
+        Ok(vendor_path)
+    } else {
+        // For release, canonicalize as it's coming from resource_dir()
+        vendor_path.canonicalize()
+            .map_err(|e| format!("Failed to canonicalize release vendor path (from base {}): {}", base_path.display(), e))
+    }
 }
 
 /// Returns the absolute path to the ComfyUI directory within the 'vendor' directory.
 pub fn get_comfyui_directory_path(app_handle: &AppHandle<Wry>) -> Result<PathBuf, String> {
-    get_vendor_path(app_handle)?
-        .join("comfyui")
-        .canonicalize()
-        .map_err(|e| format!("Failed to canonicalize comfyui directory path: {}", e))
+    let vendor_path = get_vendor_path(app_handle)?; // Will be non-canonicalized in debug
+    let comfyui_path = vendor_path.join("comfyui");
+
+    if cfg!(debug_assertions) {
+        // For debug, trust the path construction.
+        Ok(comfyui_path)
+    } else {
+        comfyui_path.canonicalize()
+            .map_err(|e| format!("Failed to canonicalize release comfyui directory path (from vendor {}): {}", vendor_path.display(), e))
+    }
 }
 
 /// Returns the absolute path to the bundled Python executable.
 pub fn get_bundled_python_executable_path(app_handle: &AppHandle<Wry>) -> Result<PathBuf, String> {
-    get_vendor_path(app_handle)?
+    let vendor_path = get_vendor_path(app_handle)?; // Will be non-canonicalized in debug
+    let python_exe_path = vendor_path
         .join("python")
-        .join(if cfg!(windows) { "python.exe" } else { "python" })
-        .canonicalize()
-        .map_err(|e| format!("Failed to canonicalize bundled python executable path: {}", e))
+        .join(if cfg!(windows) { "python.exe" } else { "python" });
+    
+    if cfg!(debug_assertions) {
+        // For debug, trust the path construction.
+        Ok(python_exe_path)
+    } else {
+        python_exe_path.canonicalize()
+            .map_err(|e| format!("Failed to canonicalize release bundled python executable path: {}", e))
+    }
 }
 
 /// Returns the absolute path to the Python executable within the ComfyUI virtual environment.
