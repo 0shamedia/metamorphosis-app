@@ -17,7 +17,7 @@ use crate::setup_manager::python_utils::{ // For python path helpers
 // The command itself is logged before execution.
 // It now emits the new `setup-progress` event.
 // This function is intended for internal use within the dependency_manager module.
-pub(super) async fn run_command_for_setup_progress(
+pub async fn run_command_for_setup_progress(
     app_handle: &AppHandle<Wry>,
     phase: &str, // e.g., "python_setup"
     current_step_base: &str, // e.g., "Creating virtual environment"

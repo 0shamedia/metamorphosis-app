@@ -10,7 +10,7 @@ pub mod model_events;
 pub mod model_utils;
 pub mod model_downloader;
 pub mod model_orchestrator;
-pub mod custom_node_management; // Added custom_node_management module
+pub mod custom_node_manager;
 pub mod python_utils;
 pub mod dependency_manager; // Added dependency_manager module
 
@@ -69,15 +69,17 @@ pub use model_config::{
     get_core_models_list,
 };
 
-// Re-export from custom_node_management
-pub use custom_node_management::{
-    clone_comfyui_ipadapter_plus,
+// Re-export from custom_node_manager
+pub use custom_node_manager::{
     clone_comfyui_impact_pack,
     clone_comfyui_impact_subpack,
+    clone_comfyui_smz_nodes,
+    clone_rgthree_comfy_nodes,
+    clone_repository_to_custom_nodes,
+    install_custom_node_dependencies,
 };
 
 // Re-export from dependency_manager
 pub use dependency_manager::{
     install_python_dependencies_with_progress,
-    install_custom_node_dependencies,
 };

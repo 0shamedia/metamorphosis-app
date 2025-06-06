@@ -6,7 +6,7 @@ pub mod python_env;
 // Re-export the public API that was previously in the old dependency_management.rs
 pub use self::python_env::{
     install_python_dependencies_with_progress,
-    install_custom_node_dependencies,
+    // install_custom_node_dependencies, // This is handled by custom_node_manager
 };
 
 // The function `run_command_for_setup_progress` from command_runner.rs

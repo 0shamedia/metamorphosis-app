@@ -118,6 +118,7 @@ pub fn copy_vendor_directories(
     dest_vendor_dir: &Path,   // e.g., metamorphosis-app/target/debug/vendor/
     force_std_fs_copy: bool,
 ) -> Result<(), Box<dyn Error>> {
+    println!("cargo:warning=VENDOR_COPIER: sync_vendor_to_target called (simulated by copy_vendor_directories entry)");
     eprintln!("cargo:warning=VENDOR_COPIER: Starting copy_vendor_directories.");
     eprintln!("cargo:warning=VENDOR_COPIER: Source vendor dir: {:?}", source_vendor_dir);
     eprintln!("cargo:warning=VENDOR_COPIER: Destination vendor dir (base for subdirs): {:?}", dest_vendor_dir);
@@ -136,6 +137,7 @@ pub fn copy_vendor_directories(
     let source_comfyui_path = source_vendor_dir.join("comfyui");
     let target_comfyui_dest_base = dest_vendor_dir.join("comfyui"); // e.g. .../target/debug/vendor/comfyui/
     
+    println!("cargo:warning=VENDOR_COPIER: Before attempting to copy comfyui directory.");
     eprintln!("cargo:warning=VENDOR_COPIER: [ComfyUI] Preparing to copy contents.");
     eprintln!("cargo:warning=VENDOR_COPIER: [ComfyUI] Source (contents from): {:?}", &source_comfyui_path);
     eprintln!("cargo:warning=VENDOR_COPIER: [ComfyUI] Target (destination for contents): {:?}", &target_comfyui_dest_base);
@@ -175,8 +177,10 @@ pub fn copy_vendor_directories(
         return Err(err_msg.into());
     }
     eprintln!("cargo:warning=VENDOR_COPIER: [ComfyUI] Section finished.");
+    println!("cargo:warning=VENDOR_COPIER: After attempting to copy comfyui directory.");
 
     // --- Copy Python ---
+    println!("cargo:warning=VENDOR_COPIER: Before attempting to copy python directory.");
     let source_python_path = source_vendor_dir.join("python");
     let target_python_dest_base = dest_vendor_dir.join("python"); // e.g. .../target/debug/vendor/python/
 
@@ -229,6 +233,7 @@ pub fn copy_vendor_directories(
         return Err(err_msg.into());
     }
     eprintln!("cargo:warning=VENDOR_COPIER: [Python] Section finished.");
+    println!("cargo:warning=VENDOR_COPIER: After attempting to copy python directory.");
 
     eprintln!("cargo:warning=VENDOR_COPIER: Vendor directory copying finished successfully.");
     Ok(())

@@ -1,5 +1,4 @@
 // metamorphosis-app/src-tauri/src/setup_manager/dependency_manager/python_env.rs
-use std::path::PathBuf;
 use std::fs;
 use log::{info, error};
 use tauri::{AppHandle, Wry};
@@ -170,6 +169,22 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
         Err(e) => error!("Failed to remove get-pip.py at {}: {}", get_pip_path.display(), e),
     }
 
+    // --- Explicitly upgrade pip, setuptools, and wheel ---
+    info!("Upgrading pip, setuptools, and wheel in the virtual environment...");
+    let upgrade_pip_args = ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"];
+    current_phase_progress = run_command_for_setup_progress(
+        app_handle, phase_name, "Upgrading core packaging tools", current_phase_progress, 5, // Allocate 5% progress
+        &venv_python_executable, &upgrade_pip_args, &comfyui_dir,
+        "Ensuring pip, setuptools, and wheel are up-to-date...", "Core packaging tools updated."
+    ).await.map_err(|e| {
+        let err_msg = format!("Failed to upgrade pip, setuptools, wheel: {}", e);
+        error!("{}", err_msg);
+        // Optionally emit a specific error event here if needed for UI
+        err_msg
+    })?;
+    info!("Successfully upgraded pip, setuptools, and wheel.");
+    // --- End explicit upgrade ---
+
     info!("Attempting to install PyTorch, Torchvision, and Torchaudio explicitly...");
     let torch_packages = vec![
         "torch==2.3.1".to_string(),
@@ -300,61 +315,4 @@ pub async fn install_python_dependencies_with_progress(app_handle: &AppHandle<Wr
     info!("Created internal dependency marker: {}", internal_deps_marker_path.display());
     
     Ok(())
-}
-
-/// Installs Python dependencies from a requirements.txt file for a given custom node.
-pub async fn install_custom_node_dependencies(
-    app_handle: AppHandle<Wry>,
-    pack_name: String,
-    pack_dir: PathBuf,
-) -> Result<(), String> {
-    let phase_name = "custom_node_deps";
-    let mut current_phase_progress: u8 = 0;
-
-    info!("[CUSTOM_NODE_DEPS] Installing dependencies for {}: {}", pack_name, pack_dir.display());
-    setup::emit_setup_progress(&app_handle, phase_name, &format!("Starting dependency installation for {}", pack_name), current_phase_progress, None, None);
-
-    let requirements_path = pack_dir.join("requirements.txt");
-
-    if !requirements_path.exists() {
-        info!("[CUSTOM_NODE_DEPS] No requirements.txt found for {}. Skipping dependency installation.", pack_name);
-        current_phase_progress = 100;
-        setup::emit_setup_progress(&app_handle, phase_name, &format!("No requirements.txt for {}. Skipping.", pack_name), current_phase_progress, None, None);
-        return Ok(());
-    }
-
-    let venv_python_executable = get_venv_python_executable_path(&app_handle)?;
-
-    if !venv_python_executable.exists() {
-        let err_msg = format!("Venv Python executable not found at {} for {} dependency installation.", venv_python_executable.display(), pack_name);
-        error!("{}", err_msg);
-        setup::emit_setup_progress(&app_handle, "error", &format!("Venv Python Missing for {}", pack_name), current_phase_progress, Some(err_msg.clone()), Some(err_msg.clone()));
-        return Err(err_msg);
-    }
-
-    let step_base = format!("Installing dependencies for {}", pack_name);
-    let pip_args = ["-m", "pip", "install", "-r", requirements_path.to_str().unwrap_or_default()];
-
-    match run_command_for_setup_progress(
-        &app_handle,
-        phase_name,
-        &step_base,
-        0, 
-        100, 
-        &venv_python_executable,
-        &pip_args,
-        &pack_dir, 
-        "Reading requirements.txt...",
-        &format!("Failed to install dependencies for {}", pack_name),
-    ).await {
-        Ok(final_progress) => {
-            info!("[CUSTOM_NODE_DEPS] Successfully installed dependencies for {}. Final progress: {}", pack_name, final_progress);
-            Ok(())
-        }
-        Err(e) => {
-            let err_msg = format!("[CUSTOM_NODE_DEPS] Error installing dependencies for {}: {}", pack_name, e);
-            error!("{}", err_msg);
-            Err(err_msg)
-        }
-    }
 }

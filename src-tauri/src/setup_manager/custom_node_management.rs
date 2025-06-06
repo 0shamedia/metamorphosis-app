@@ -32,235 +32,10 @@ use crate::setup_manager::event_utils::emit_event; // Using the specific emit_ev
 use crate::setup_manager::dependency_manager::install_custom_node_dependencies; // Changed from crate::dependency_management
 use crate::gpu_detection::{get_gpu_info, GpuType}; // Import GPU detection utilities
 
-const IPADAPTER_PLUS_REPO_URL: &str = "https://github.com/cubiq/ComfyUI_IPAdapter_plus.git";
-const IPADAPTER_PLUS_NODE_NAME: &str = "ComfyUI_IPAdapter_plus";
-
-const IMPACT_PACK_REPO_URL: &str = "https://github.com/ltdrdata/ComfyUI-Impact-Pack.git";
-const IMPACT_PACK_NODE_NAME: &str = "ComfyUI-Impact-Pack";
-
-const IMPACT_SUBPACK_REPO_URL: &str = "https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git";
-const IMPACT_SUBPACK_NODE_NAME: &str = "ComfyUI-Impact-Subpack";
-
-// New Custom Nodes from architectural doc (verified)
-const SMZ_NODES_REPO_URL: &str = "https://github.com/shiimizu/ComfyUI_smZNodes.git";
-const SMZ_NODES_NODE_NAME: &str = "ComfyUI_smZNodes";
-
-const INSTANTID_REPO_URL: &str = "https://github.com/cubiq/ComfyUI_InstantID.git";
-const INSTANTID_NODE_NAME: &str = "ComfyUI_InstantID";
-
-const IC_LIGHT_REPO_URL: &str = "https://github.com/kijai/ComfyUI-IC-Light.git";
-const IC_LIGHT_NODE_NAME: &str = "ComfyUI-IC-Light";
-
-// rgthree-comfy is optional and doesn't have specific python deps or models, standard clone.
-const RGTHREE_NODES_REPO_URL: &str = "https://github.com/rgthree/rgthree-comfy.git";
-const RGTHREE_NODES_NODE_NAME: &str = "rgthree-comfy";
-
-const COMFYUI_CLIPSEG_REPO_URL: &str = "https://github.com/time-river/ComfyUI-CLIPSeg.git";
-const COMFYUI_CLIPSEG_NODE_NAME: &str = "ComfyUI-CLIPSeg";
-
-const ONNXRUNTIME_PACKAGE: &str = "onnxruntime";
-// TODO: Investigate installing onnxruntime-gpu as per ComfyUI-InstantID README
-const INSIGHTFACE_PACKAGE: &str = "insightface";
-
-const CHECK_ONNX_SCRIPT_NAME: &str = "check_onnx.py";
-const CHECK_INSIGHTFACE_SCRIPT_NAME: &str = "check_insightface.py";
 
 // Removed local get_comfyui_base_path, will use python_utils::get_comfyui_directory_path
 // Removed local get_venv_python_executable, will use python_utils::get_venv_python_executable_path
 
-/// Executes a Python script and checks its exit code.
-async fn execute_python_script_check(
-    python_executable: &Path,
-    script_content: &str,
-    script_name: &str,
-    comfyui_base_path: &Path,
-) -> Result<bool, String> {
-    let script_path = comfyui_base_path.join(script_name);
-    fs::write(&script_path, script_content).await.map_err(|e| {
-        format!("Failed to write Python script {}: {}", script_path.display(), e)
-    })?;
-
-    debug!("Executing Python script check: {} with script {}", python_executable.display(), script_name);
-    let mut cmd = TokioCommand::new(python_executable);
-    cmd.arg(&script_path)
-        .current_dir(comfyui_base_path) // Run script from comfyui_base_path
-        .stdout(ProcessStdio::piped())
-        .stderr(ProcessStdio::piped());
-
-    let child = cmd.spawn().map_err(|e| format!("Failed to spawn script {}: {}", script_name, e))?;
-    let output = child.wait_with_output().await.map_err(|e| format!("Failed to wait for script {}: {}", script_name, e))?;
-    
-    fs::remove_file(&script_path).await.map_err(|e| format!("Failed to remove script {}: {}", script_path.display(), e))?;
-
-    if output.status.success() {
-        debug!("Script {} executed successfully.", script_name);
-        Ok(true)
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        debug!("Script {} failed. Stderr: {}", script_name, stderr.trim());
-        Ok(false)
-    }
-}
-
-/// Runs a pip command in the ComfyUI virtual environment.
-async fn run_pip_command(
-    app_handle: &AppHandle<Wry>,
-    python_executable: &Path,
-    args: &[&str],
-    package_name_for_event: &str, // For emitting specific package events
-    method: &str, // "pip" or "wheel"
-) -> Result<(), String> {
-    info!("[PIP_INSTALL] Running pip command for {}: {:?} with args: {:?}", package_name_for_event, python_executable.display(), args);
-    emit_event(
-        app_handle,
-        "PackageInstallStart",
-        Some(json!({ "packageName": package_name_for_event, "method": method })),
-    );
-
-    let mut cmd = TokioCommand::new(python_executable);
-    cmd.arg("-m").arg("pip").args(args)
-        .stdout(ProcessStdio::piped())
-        .stderr(ProcessStdio::piped());
-    
-    // It's generally better to run pip from the comfyui_base_path if not otherwise specified
-    if let Some(comfyui_root) = python_executable.ancestors().nth(if cfg!(windows) {3} else {2}) {
-        if comfyui_root.join("pyproject.toml").exists() || comfyui_root.join("setup.py").exists() || comfyui_root.join("requirements.txt").exists() {
-             cmd.current_dir(comfyui_root);
-             debug!("Set pip command working directory to: {}", comfyui_root.display());
-        } else {
-            warn!("Could not determine a suitable ComfyUI root for pip command from {}", python_executable.display());
-        }
-    }
-
-
-    let mut child = cmd.spawn().map_err(|e| {
-        let err_msg = format!("Failed to spawn pip command for {}: {}", package_name_for_event, e);
-        error!("{}", err_msg);
-        emit_event(
-            app_handle,
-            "PackageInstallFailed",
-            Some(json!({ "packageName": package_name_for_event, "error": err_msg.clone(), "osHint": serde_json::Value::Null })),
-        );
-        err_msg
-    })?;
-
-    let stdout = child.stdout.take().ok_or(format!("Failed to capture stdout for pip command for {}", package_name_for_event))?;
-    let stderr = child.stderr.take().ok_or(format!("Failed to capture stderr for pip command for {}", package_name_for_event))?;
-
-    let app_handle_clone_stdout = app_handle.clone();
-    let package_name_clone_stdout = package_name_for_event.to_string();
-    let stdout_task = tokio::task::spawn(async move {
-        let mut reader = TokioBufReader::new(stdout);
-        let mut line_buf = String::new();
-        while let Ok(n) = reader.read_line(&mut line_buf).await {
-            if n == 0 { break; } // EOF
-            let line_to_process = line_buf.trim_end().to_string();
-            info!("[PIP_INSTALL] Stdout for {}: {}", package_name_clone_stdout, line_to_process);
-
-            // More aggressive filtering for pip stdout
-            let lower_line = line_to_process.to_lowercase();
-            let is_significant_action = lower_line.starts_with("installing ") || // "Installing collected packages", "Installing X..."
-                                        lower_line.starts_with("successfully installed") ||
-                                        lower_line.starts_with("collecting ") || // Show initial "Collecting X, Y, Z"
-                                        lower_line.starts_with("downloading ");  // Show initial "Downloading X"
-
-            let is_too_verbose = lower_line.starts_with("debug:") ||
-                                 lower_line.starts_with("requirement already satisfied") ||
-                                 lower_line.starts_with("using cached") ||
-                                 lower_line.contains("looking in indexes:") ||
-                                 lower_line.contains("processing ") && lower_line.contains(".whl") ||
-                                 lower_line.contains("http://") || lower_line.contains("https://") || // Filter URLs
-                                 lower_line.contains("satisfied constraint") ||
-                                 lower_line.contains("source distribution") ||
-                                 lower_line.contains("building wheel") ||
-                                 lower_line.contains("running setup.py") ||
-                                 lower_line.contains("creating build") ||
-                                 lower_line.contains("copying") && lower_line.contains("to build") ||
-                                 lower_line.starts_with("  ") && package_name_clone_stdout == "pip"; // Filter indented pip update details
-
-            if is_significant_action || !is_too_verbose {
-                emit_event(
-                    &app_handle_clone_stdout,
-                    "pip-output",
-                    Some(json!({ "packageName": package_name_clone_stdout, "output": line_to_process, "stream": "stdout" })),
-                );
-            } else {
-                debug!("[PIP_INSTALL] Filtered (stdout) for {}: {}", package_name_clone_stdout, line_to_process);
-            }
-            line_buf.clear();
-        }
-    });
-
-    let app_handle_clone_stderr = app_handle.clone();
-    let package_name_clone_stderr = package_name_for_event.to_string();
-    let stderr_task = tokio::task::spawn(async move {
-        let mut reader = TokioBufReader::new(stderr);
-        let mut line_buf = String::new();
-        while let Ok(n) = reader.read_line(&mut line_buf).await {
-            if n == 0 { break; } // EOF
-            let line_to_process = line_buf.trim_end().to_string();
-            error!("[PIP_INSTALL] Stderr for {}: {}", package_name_clone_stderr, line_to_process);
-            
-            // More aggressive filtering for pip stderr
-            let lower_line = line_to_process.to_lowercase();
-            let is_truly_error_indicative = !lower_line.contains("defaulting to user installation") &&
-                                           !lower_line.contains("consider adding this directory to path") &&
-                                           !lower_line.contains("requirement already satisfied") && // Often not an error
-                                           !(lower_line.starts_with("warning: the script ") && lower_line.contains("is installed in")) && // Path warnings
-                                           !(lower_line.starts_with("warning:") && lower_line.contains(" βρίσκεται ")) && // Greek path warning
-                                           !lower_line.contains("skipping link:"); // Git/symlink messages sometimes go to stderr
-
-            if is_truly_error_indicative {
-                emit_event(
-                    &app_handle_clone_stderr,
-                    "pip-output",
-                    Some(json!({ "packageName": package_name_clone_stderr, "output": line_to_process, "stream": "stderr" })),
-                );
-            } else {
-                // Log as info or debug if it's a common, non-critical stderr message
-                info!("[PIP_INSTALL] Filtered/Demoted (stderr) for {}: {}", package_name_clone_stderr, line_to_process);
-            }
-            line_buf.clear();
-        }
-    });
-
-    let status = child.wait().await.map_err(|e| {
-        let err_msg = format!("Failed to wait for pip command for {}: {}", package_name_for_event, e);
-        error!("{}", err_msg);
-        emit_event(
-            app_handle,
-            "PackageInstallFailed",
-            Some(json!({ "packageName": package_name_for_event, "error": err_msg.clone(), "osHint": serde_json::Value::Null })),
-        );
-        err_msg
-    })?;
-
-    stdout_task.await.map_err(|e| format!("Stdout task for pip command for {} panicked: {:?}", package_name_for_event, e))?;
-    stderr_task.await.map_err(|e| format!("Stderr task for pip command for {} panicked: {:?}", package_name_for_event, e))?;
-
-
-    if status.success() {
-        info!("[PIP_INSTALL] Successfully installed/updated {}.", package_name_for_event);
-        emit_event(
-            app_handle,
-            "PackageInstallSuccess",
-            Some(json!({ "packageName": package_name_for_event })),
-        );
-        Ok(())
-    } else {
-        let err_msg = format!(
-            "Pip command for {} failed with status: {:?}",
-            package_name_for_event, status
-        );
-        error!("{}", err_msg);
-        emit_event(
-            app_handle,
-            "PackageInstallFailed",
-            Some(json!({ "packageName": package_name_for_event, "error": err_msg.clone(), "osHint": serde_json::Value::Null })), // osHint will be added later for specific cases
-        );
-        Err(err_msg)
-    }
-}
 
 
 /// Generic function to clone a custom node repository and install its dependencies.
@@ -460,20 +235,190 @@ pub async fn clone_rgthree_comfy_nodes(app_handle: &AppHandle<Wry>) -> Result<()
 
 /// Clones the ComfyUI-CLIPSeg custom node repository and installs its dependencies.
 pub async fn clone_comfyui_clipseg(app_handle: &AppHandle<Wry>) -> Result<(), String> {
-    clone_custom_node_repo(
-        app_handle,
-        COMFYUI_CLIPSEG_NODE_NAME,
-        COMFYUI_CLIPSEG_REPO_URL,
-        Some(|app_handle_param, node_name_param, pack_dir_param| {
-            // ComfyUI-CLIPSeg might have its own requirements.txt
-            let pack_dir_owned = pack_dir_param.to_path_buf();
-            Box::pin(install_custom_node_dependencies(app_handle_param.clone(), node_name_param.to_string(), pack_dir_owned))
-        })
-    )
-    .await
+    info!("[CUSTOM_NODE_SETUP] Attempting to install {}...", COMFYUI_CLIPSEG_NODE_NAME);
+    emit_custom_node_clone_start(app_handle, COMFYUI_CLIPSEG_NODE_NAME);
+
+    let comfyui_base_path = get_comfyui_directory_path(app_handle)?;
+    let custom_nodes_dir = comfyui_base_path.join("custom_nodes");
+    let final_clipseg_py_path = custom_nodes_dir.join("clipseg.py");
+
+    if !custom_nodes_dir.exists() {
+        std_fs::create_dir_all(&custom_nodes_dir).map_err(|e| {
+            let err_msg = format!("Failed to create custom_nodes directory at {}: {}", custom_nodes_dir.display(), e);
+            error!("[CUSTOM_NODE_SETUP] {}", err_msg);
+            emit_custom_node_clone_failed(app_handle, COMFYUI_CLIPSEG_NODE_NAME, &err_msg);
+            err_msg
+        })?;
+        info!("[CUSTOM_NODE_SETUP] Created custom_nodes directory: {}", custom_nodes_dir.display());
+    }
+
+    if final_clipseg_py_path.exists() {
+        info!("[CUSTOM_NODE_SETUP] {} already exists at {}. Skipping installation.", COMFYUI_CLIPSEG_NODE_NAME, final_clipseg_py_path.display());
+        emit_custom_node_already_exists(app_handle, COMFYUI_CLIPSEG_NODE_NAME);
+        // Even if clipseg.py exists, we might want to ensure dependencies are checked/installed.
+        // For now, let's assume if clipseg.py is there, deps were handled.
+        // If strict dependency re-check is needed, logic can be added here.
+        return Ok(());
+    }
+
+    // Create a unique temporary directory for cloning
+    let temp_clone_dir_name = format!("ComfyUI-CLIPSeg_temp_{}", uuid::Uuid::new_v4());
+    let temp_clone_path = env::temp_dir().join("metamorphosis_clones").join(&temp_clone_dir_name);
+    
+    // Ensure the parent directory for temp clones exists
+    if let Some(parent) = temp_clone_path.parent() {
+        if !parent.exists() {
+            std_fs::create_dir_all(parent).map_err(|e| {
+                format!("Failed to create parent temp clone directory at {}: {}", parent.display(), e)
+            })?;
+        }
+    }
+
+
+    info!("[CUSTOM_NODE_SETUP] Cloning {} to temporary directory: {}", COMFYUI_CLIPSEG_REPO_URL, temp_clone_path.display());
+
+    let mut command = TokioCommand::new("git");
+    let git_temp_clone_path_arg_string;
+    if cfg!(windows) {
+        let path_str_cow = temp_clone_path.to_string_lossy();
+        if path_str_cow.starts_with("\\\\?\\") {
+            git_temp_clone_path_arg_string = path_str_cow.trim_start_matches("\\\\?\\").to_string();
+        } else {
+            git_temp_clone_path_arg_string = path_str_cow.into_owned();
+        }
+    } else {
+        git_temp_clone_path_arg_string = temp_clone_path.to_string_lossy().into_owned();
+    }
+
+    command.arg("clone").arg(COMFYUI_CLIPSEG_REPO_URL).arg(&git_temp_clone_path_arg_string)
+        .stdout(ProcessStdio::piped())
+        .stderr(ProcessStdio::piped());
+
+    let child = command.spawn().map_err(|e| {
+        let err_msg = if e.kind() == std::io::ErrorKind::NotFound {
+            "Git command not found. Please ensure Git is installed and in your system's PATH.".to_string()
+        } else {
+            format!("Failed to execute git clone command for {} (temp): {}", COMFYUI_CLIPSEG_NODE_NAME, e)
+        };
+        error!("[CUSTOM_NODE_SETUP] {}", err_msg);
+        emit_custom_node_clone_failed(app_handle, COMFYUI_CLIPSEG_NODE_NAME, &err_msg);
+        err_msg
+    })?;
+
+    let output = child.wait_with_output().await.map_err(|e| {
+        let err_msg = format!("Failed to wait for git clone command for {} (temp): {}", COMFYUI_CLIPSEG_NODE_NAME, e);
+        error!("[CUSTOM_NODE_SETUP] {}", err_msg);
+        emit_custom_node_clone_failed(app_handle, COMFYUI_CLIPSEG_NODE_NAME, &err_msg);
+        err_msg
+    })?;
+
+    if !output.status.success() {
+        let stderr_str = String::from_utf8_lossy(&output.stderr);
+        let stdout_str = String::from_utf8_lossy(&output.stdout);
+        let err_msg = format!(
+            "Failed to clone {} (temp). Git command exited with error. Status: {}. Stderr: {}. Stdout: {}",
+            COMFYUI_CLIPSEG_NODE_NAME, output.status, stderr_str.trim(), stdout_str.trim()
+        );
+        error!("[CUSTOM_NODE_SETUP] {}", err_msg);
+        emit_custom_node_clone_failed(app_handle, COMFYUI_CLIPSEG_NODE_NAME, &err_msg);
+        // Cleanup temp dir on failure
+        if temp_clone_path.exists() {
+            if let Err(e_rm) = fs::remove_dir_all(&temp_clone_path).await {
+                warn!("[CUSTOM_NODE_SETUP] Failed to clean up temporary directory {} after failed clone: {}", temp_clone_path.display(), e_rm);
+            }
+        }
+        return Err(err_msg);
+    }
+
+    info!("[CUSTOM_NODE_SETUP] Successfully cloned {} to temporary directory {}", COMFYUI_CLIPSEG_NODE_NAME, temp_clone_path.display());
+
+    // Copy clipseg.py
+    let temp_clipseg_py_src_path = temp_clone_path.join("custom_nodes").join("clipseg.py"); // Adjusted path
+    if !temp_clipseg_py_src_path.exists() {
+        let err_msg = format!("clipseg.py not found in temporary clone at {}", temp_clipseg_py_src_path.display());
+        error!("[CUSTOM_NODE_SETUP] {}", err_msg);
+        emit_custom_node_clone_failed(app_handle, COMFYUI_CLIPSEG_NODE_NAME, &err_msg);
+        if temp_clone_path.exists() {
+            if let Err(e_rm) = fs::remove_dir_all(&temp_clone_path).await {
+                warn!("[CUSTOM_NODE_SETUP] Failed to clean up temporary directory {}: {}", temp_clone_path.display(), e_rm);
+            }
+        }
+        return Err(err_msg);
+    }
+
+    info!("[CUSTOM_NODE_SETUP] Copying {} from {} to {}", "clipseg.py", temp_clipseg_py_src_path.display(), final_clipseg_py_path.display());
+    if let Err(e) = fs::copy(&temp_clipseg_py_src_path, &final_clipseg_py_path).await {
+        let err_msg = format!("Failed to copy clipseg.py from {} to {}: {}", temp_clipseg_py_src_path.display(), final_clipseg_py_path.display(), e);
+        error!("[CUSTOM_NODE_SETUP] {}", err_msg);
+        emit_custom_node_clone_failed(app_handle, COMFYUI_CLIPSEG_NODE_NAME, &err_msg);
+        if temp_clone_path.exists() {
+            if let Err(e_rm_inner) = fs::remove_dir_all(&temp_clone_path).await {
+                warn!("[CUSTOM_NODE_SETUP] Failed to clean up temporary directory {} after failed copy: {}", temp_clone_path.display(), e_rm_inner);
+            }
+        }
+        return Err(err_msg);
+    }
+    info!("[CUSTOM_NODE_SETUP] Successfully copied clipseg.py to {}", final_clipseg_py_path.display());
+
+
+    // Install dependencies from requirements.txt in the temporary clone
+    let temp_requirements_txt_path = temp_clone_path.join("requirements.txt");
+    if temp_requirements_txt_path.exists() {
+        info!("[CUSTOM_NODE_SETUP] Found requirements.txt for {} in temporary clone at {}. Installing dependencies...", COMFYUI_CLIPSEG_NODE_NAME, temp_requirements_txt_path.display());
+        if let Err(e) = install_custom_node_dependencies(app_handle.clone(), COMFYUI_CLIPSEG_NODE_NAME.to_string(), temp_clone_path.clone()).await {
+            let err_msg = format!("Failed to install dependencies for {}: {}", COMFYUI_CLIPSEG_NODE_NAME, e);
+            error!("[CUSTOM_NODE_SETUP] {}", err_msg);
+            // Don't emit_custom_node_clone_failed here as install_custom_node_dependencies has its own event emitting
+            if temp_clone_path.exists() {
+                if let Err(e_rm_inner_deps) = fs::remove_dir_all(&temp_clone_path).await {
+                    warn!("[CUSTOM_NODE_SETUP] Failed to clean up temporary directory {} after failed dependency install: {}", temp_clone_path.display(), e_rm_inner_deps);
+                }
+            }
+            return Err(err_msg);
+        }
+        info!("[CUSTOM_NODE_SETUP] Successfully processed dependencies for {}.", COMFYUI_CLIPSEG_NODE_NAME);
+    } else {
+        info!("[CUSTOM_NODE_SETUP] No requirements.txt found for {} in temporary clone. Skipping dependency installation.", COMFYUI_CLIPSEG_NODE_NAME);
+    }
+    
+    // Also install general insightface dependencies, as CLIPSeg might rely on onnxruntime which is part of insightface setup
+    // This might be redundant if requirements.txt already handles onnxruntime, but it's safer.
+    info!("[CUSTOM_NODE_SETUP] Ensuring general onnxruntime/insightface dependencies are met for {}.", COMFYUI_CLIPSEG_NODE_NAME);
+    if let Err(e) = install_insightface_dependencies(app_handle.clone()).await {
+        let err_msg = format!("Failed to install general insightface/onnxruntime dependencies for {}: {}", COMFYUI_CLIPSEG_NODE_NAME, e);
+        error!("[CUSTOM_NODE_SETUP] {}", err_msg);
+        if temp_clone_path.exists() {
+            if let Err(e_rm_inner_insight) = fs::remove_dir_all(&temp_clone_path).await {
+                warn!("[CUSTOM_NODE_SETUP] Failed to clean up temporary directory {} after failed insightface dependency install: {}", temp_clone_path.display(), e_rm_inner_insight);
+            }
+        }
+        return Err(err_msg);
+    }
+
+    // Cleanup temporary directory
+    info!("[CUSTOM_NODE_SETUP] Cleaning up temporary directory: {}", temp_clone_path.display());
+    if temp_clone_path.exists() { // Check before attempting to remove
+        fs::remove_dir_all(&temp_clone_path).await.map_err(|e| {
+            // This is not a critical failure for the node installation itself, so just warn.
+            let warn_msg = format!("Failed to clean up temporary directory {}: {}. Manual cleanup might be required.", temp_clone_path.display(), e);
+            warn!("[CUSTOM_NODE_SETUP] {}", warn_msg);
+            // Return Ok here as the primary operation (copying clipseg.py) succeeded.
+            // If cleanup failure should be an error, change this to Err(warn_msg).
+            warn_msg // Or just return Ok(()) if we don't want to propagate this warning as an error.
+                     // For now, let's make it a non-blocking warning.
+        }).unwrap_or_else(|_warn_msg| {
+            // This block executes if remove_dir_all itself returns an error that we map_err'd.
+            // Since we are only warning, we don't need to do anything special here.
+        });
+    } else {
+        info!("[CUSTOM_NODE_SETUP] Temporary directory {} was already removed or never existed.", temp_clone_path.display());
+    }
+
+
+    info!("[CUSTOM_NODE_SETUP] Successfully installed {}.", COMFYUI_CLIPSEG_NODE_NAME);
+    emit_custom_node_clone_success(app_handle, COMFYUI_CLIPSEG_NODE_NAME);
+    Ok(())
 }
-
-
 /// Installs insightface and its dependencies (onnxruntime).
 // Removed comfyui_base_path_arg as it's unused; comfyui_base_path is fetched internally.
 pub async fn install_insightface_dependencies(app_handle: AppHandle<Wry>) -> Result<(), String> { // Changed to take owned AppHandle
