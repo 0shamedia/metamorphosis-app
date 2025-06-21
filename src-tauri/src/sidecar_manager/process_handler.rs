@@ -3,22 +3,22 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
-use std::pin::Pin;
-use std::future::Future;
-use tauri::{AppHandle, Wry, async_runtime};
-use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri::{AppHandle, Wry};
 use tauri_plugin_shell::ShellExt;
 use once_cell::sync::Lazy;
 use log::{info, error};
+use std::collections::HashMap;
 
 // Internal imports from sibling modules
 use super::event_utils::{emit_backend_status, COMFYUI_PORT};
 
 // Crate-level imports
-use crate::gpu_detection::{get_gpu_info, GpuType}; // GpuInfo is not directly used here but GpuType is
+use crate::gpu_detection::{get_gpu_info, GpuType};
+use crate::setup_manager::python_utils::{get_conda_env_python_executable_path, get_conda_executable_path};
+use crate::process_manager::ProcessManager;
 
 // Global static variables for process management
-pub static COMFYUI_CHILD_PROCESS: Lazy<Mutex<Option<CommandChild>>> = Lazy::new(|| Mutex::new(None));
+// COMFYUI_CHILD_PROCESS is now deprecated and handled by the central ProcessManager.
 pub static IS_ATTEMPTING_SPAWN: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
 pub static RESTART_ATTEMPTS: Lazy<Mutex<u32>> = Lazy::new(|| Mutex::new(0));
 pub static LAST_RESTART_TIME: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
@@ -28,22 +28,16 @@ pub const MAX_RESTARTS_PER_HOUR: u32 = 5;
 // Renamed: Internal function to actually spawn the sidecar process
 // Assumes dependencies are already installed. Returns Result.
 // This function is intended for internal use by orchestration functions.
-pub(super) fn spawn_comfyui_process(app_handle: AppHandle<Wry>) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
+pub(super) async fn spawn_comfyui_process(app_handle: AppHandle<Wry>) -> Result<(), String> {
     log::error!("[EARLY_SPAWN_DEBUG] INTERNAL spawn_comfyui_process INVOKED");
     
-    // This function should not manage IS_ATTEMPTING_SPAWN.
-    // That flag is managed by the calling orchestrator.
-    // It should, however, check if a process is already running.
-    if COMFYUI_CHILD_PROCESS.lock().unwrap().is_some() {
-        info!("[PROCESS_HANDLER] spawn_comfyui_process: ComfyUI process is already active. Skipping new spawn.");
-        return Box::pin(async { Ok(()) }); // Or perhaps an error indicating it's already running if that's unexpected by caller
-    }
+    // The check for an existing process is now implicitly handled by the orchestration logic
+    // which should not call this if a process is running. The ProcessManager will log if a
+    // process with the same name is spawned.
 
-    // let app_handle_clone = app_handle.clone(); // This was unused as app_handle is moved into the async block
-    Box::pin(async move { // app_handle is moved here
-        // The scopeguard for IS_ATTEMPTING_SPAWN is removed from here as it's managed by the caller.
+    // The scopeguard for IS_ATTEMPTING_SPAWN is managed by the caller.
 
-        info!("Attempting to spawn ComfyUI process on port {}...", COMFYUI_PORT);
+    info!("Attempting to spawn ComfyUI process on port {}...", COMFYUI_PORT);
         // emit_backend_status is now in event_utils
         emit_backend_status(&app_handle, "starting_sidecar", format!("Starting ComfyUI backend on port {}...", COMFYUI_PORT), false);
 
@@ -66,15 +60,9 @@ pub(super) fn spawn_comfyui_process(app_handle: AppHandle<Wry>) -> Pin<Box<dyn F
             target_dir.join("vendor").join("comfyui")
         };
 
-        let venv_dir = comfyui_dir.join(".venv");
-        let venv_python_executable = if cfg!(target_os = "windows") {
-            venv_dir.join("Scripts").join("python.exe")
-        } else {
-            venv_dir.join("bin").join("python")
-        };
-
-        if !venv_python_executable.exists() {
-            let err_msg = format!("Virtual environment Python executable not found at expected path: {}", venv_python_executable.display());
+        let conda_exe_path = get_conda_executable_path(&app_handle).await?;
+        if !conda_exe_path.exists() {
+            let err_msg = format!("Conda executable not found at expected path: {}", conda_exe_path.display());
             error!("{}", err_msg);
             emit_backend_status(&app_handle, "backend_error", err_msg.clone(), true);
             return Err(err_msg);
@@ -95,22 +83,22 @@ pub(super) fn spawn_comfyui_process(app_handle: AppHandle<Wry>) -> Pin<Box<dyn F
             return Err(err_msg);
         }
 
-        info!("Using Python executable: {}", venv_python_executable.display());
+        info!("Using Conda executable: {}", conda_exe_path.display());
         info!("Using ComfyUI script: {}", main_script.display());
         info!("Setting CWD to: {}", comfyui_dir.display());
 
         let gpu_info = get_gpu_info();
         info!("Detected GPU Info: {:?}", gpu_info);
 
-        let mut args = vec![
-            main_script.to_string_lossy().into_owned(),
-            "--listen".to_string(), 
-            "--front-end-version".to_string(), 
-            "Comfy-Org/ComfyUI_frontend@v1.18.2".to_string(), 
-            "--port".to_string(), 
+        let mut comfyui_args = vec![
+            "main.py".to_string(), // Relative to the CWD, which is comfyui_dir
+            "--listen".to_string(),
+            "--front-end-version".to_string(),
+            "Comfy-Org/ComfyUI_frontend@v1.18.2".to_string(),
+            "--port".to_string(),
             COMFYUI_PORT.to_string(),
             "--enable-cors-header".to_string(),
-            "*".to_string(), // Allow all origins for now, can be restricted later
+            "*".to_string(),
         ];
 
         let use_cpu = match gpu_info.gpu_type {
@@ -133,90 +121,61 @@ pub(super) fn spawn_comfyui_process(app_handle: AppHandle<Wry>) -> Pin<Box<dyn F
         };
 
         if use_cpu {
-            args.push("--cpu".to_string());
+            comfyui_args.push("--cpu".to_string());
         }
 
-        info!("ComfyUI args: {:?}", args);
+        // 1. Capture the environment from Conda
+        info!("Capturing environment variables from conda env 'comfyui_env'...");
+        let env_capture_output = app_handle.shell()
+            .command(&conda_exe_path)
+            .args(&["run", "-n", "comfyui_env", "cmd", "/c", "set"])
+            .output()
+            .await
+            .map_err(|e| format!("Failed to capture conda environment: {}", e))?;
 
-        let final_command = format!("{} {}", venv_python_executable.to_string_lossy(), args.join(" "));
+        if !env_capture_output.status.success() {
+            return Err(format!("Failed to capture conda environment. Stderr: {}", String::from_utf8_lossy(&env_capture_output.stderr)));
+        }
+
+        let env_vars: HashMap<String, String> = String::from_utf8_lossy(&env_capture_output.stdout)
+            .lines()
+            .filter_map(|line| {
+                if let Some((key, value)) = line.split_once('=') {
+                    Some((key.to_string(), value.to_string()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        info!("Successfully captured {} environment variables.", env_vars.len());
+
+        // 2. Get python executable and spawn with the captured env
+        let python_exe_path = get_conda_env_python_executable_path(&app_handle, "comfyui_env").await?;
+        info!("Direct Python executable path: {}", python_exe_path.display());
+
+        let final_command = format!("{} {}", python_exe_path.to_string_lossy(), comfyui_args.join(" "));
         info!("Final ComfyUI launch command: {}", final_command);
         info!("Working Directory: {}", comfyui_dir.display());
-        info!("Command path being used: {}", venv_python_executable.to_string_lossy());
-        info!("Working directory being used: {}", comfyui_dir.display());
 
-        info!("Attempting to spawn ComfyUI process...");
-        let (mut rx, child) = match app_handle.shell().command(&venv_python_executable)
-            .args(args.clone())
-            .current_dir(&comfyui_dir) 
-            .spawn() {
-                Ok((rx, child)) => {
-                    info!("ComfyUI process started successfully (PID: {}).", child.pid());
-                    info!("Successfully spawned ComfyUI process."); 
-                    (rx, child)
-                },
-                Err(e) => {
-                    let err_msg = format!("Failed to spawn ComfyUI process: {}", e);
-                    error!("{}", err_msg);
-                    emit_backend_status(&app_handle, "backend_error", err_msg.clone(), true);
-                    return Err(err_msg);
-                }
-            };
+        info!("Preparing to spawn ComfyUI process via ProcessManager...");
+        let command = app_handle.shell().command(python_exe_path)
+            .args(comfyui_args)
+            .current_dir(&comfyui_dir)
+            .envs(env_vars);
 
-        async_runtime::spawn(async move {
-            // let app_handle_clone_for_logs = app_handle.clone(); // This clone is not used if emit_backend_status on termination is commented out
-            // let app_handle_for_event_emission = app_handle_clone_for_logs; // Renaming for clarity - currently unused
-            while let Some(event) = rx.recv().await {
-                match event {
-                    CommandEvent::Stdout(line) => {
-                        info!("[ComfyUI stdout] {}", String::from_utf8_lossy(&line));
-                    }
-                    CommandEvent::Stderr(line) => {
-                        error!("[ComfyUI stderr] {}", String::from_utf8_lossy(&line)); 
-                    }
-                    CommandEvent::Terminated(exit_status) => {
-                        info!("[ComfyUI] Process terminated with status: {:?}", exit_status);
-                        let mut child_lock = COMFYUI_CHILD_PROCESS.lock().unwrap();
-                        if child_lock.is_some() {
-                            *child_lock = None;
-                            info!("ComfyUI child process handle cleared on termination.");
-                            // emit_backend_status(&app_handle_for_event_emission, "sidecar_terminated", format!("ComfyUI process terminated: {:?}", exit_status), false);
-                        }
-                    }
-                    _ => {} 
-                }
-            }
-            info!("[ComfyUI] Output stream processing finished.");
-        });
+        ProcessManager::spawn_managed_process(
+            &app_handle,
+            "comfyui_sidecar".to_string(),
+            command,
+        ).await?;
 
+        info!("ComfyUI sidecar process has been handed off to the ProcessManager.");
 
-        *COMFYUI_CHILD_PROCESS.lock().unwrap() = Some(child);
-        info!("ComfyUI child process handle stored successfully.");
+        // The ProcessManager now handles logging stdout/stderr and termination.
+        // Health check is handled by the calling orchestration function.
 
-        // Health check is now handled by the calling orchestration function
-        // emit_backend_status(&app_handle, "sidecar_spawned_checking_health", "ComfyUI process spawned. Performing initial health check...".to_string(), false);
-        // No direct call to perform_comfyui_health_check here anymore.
-
-        Ok(()) 
-    })
-}
-
-pub fn is_comfyui_process_active() -> bool {
-    COMFYUI_CHILD_PROCESS.lock().unwrap().is_some()
-}
-
-pub fn stop_comfyui_sidecar() {
-    info!("Attempting to stop ComfyUI sidecar process...");
-    if let Ok(mut child_lock) = COMFYUI_CHILD_PROCESS.lock() {
-        if let Some(child) = child_lock.take() { 
-            info!("Found ComfyUI process (PID: {}), attempting to kill...", child.pid());
-            match child.kill() {
-                Ok(_) => info!("ComfyUI process killed successfully."),
-                Err(e) => error!("Failed to kill ComfyUI process: {}", e),
-            }
-        } else {
-            info!("No active ComfyUI process found to stop.");
-        }
-    } else {
-        error!("Failed to acquire lock for ComfyUI process handle.");
+        Ok(())
     }
-}
+
+// The is_comfyui_process_active and stop_comfyui_sidecar functions are now deprecated.
+// Process lifecycle and state are managed by the central ProcessManager.

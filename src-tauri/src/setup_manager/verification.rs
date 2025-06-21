@@ -1,20 +1,20 @@
 // metamorphosis-app/src-tauri/src/setup_manager/verification.rs
 use tauri::{WebviewWindow, AppHandle, Manager, Wry, Emitter};
+use tauri_plugin_shell::ShellExt;
 use serde_json::json;
+use tokio::io::AsyncWriteExt;
 use log::{error, info, warn};
-use std::path::Path; // PathBuf is no longer directly used here
+use std::path::{Path, PathBuf};
 use std::fs;
-use std::process::{Command, Stdio};
-use std::io::{BufReader, BufRead};
+use crate::process_manager::ProcessManager;
 // use std::env; // No longer needed
 
 // Import new python_utils functions
 use crate::setup_manager::python_utils::{
     get_comfyui_directory_path,
-    get_bundled_python_executable_path,
-    get_venv_python_executable_path,
-    get_script_path as get_util_script_path, // Alias to avoid conflict if a local one exists temporarily
+    get_conda_env_python_executable_path,
 };
+use crate::setup_manager::orchestration::get_app_root_path; // Import get_app_root_path
 
 // use super::types::SetupStatusEvent;
 
@@ -112,29 +112,19 @@ pub async fn check_initialization_status(window: WebviewWindow) -> Result<(), St
     
     let check_2_start = std::time::Instant::now();
 
-    // Check 2: Check Python Executable Path
-    info!("[SETUP_VERIFICATION] Check 2: Checking Python Executable Path...");
-    let python_executable_path_result = get_bundled_python_executable_path(&app_handle);
+    // Check 2: Check Miniconda Installation
+    info!("[SETUP_VERIFICATION] Check 2: Checking Miniconda Installation...");
+    let app_root_path = get_app_root_path()?;
+    let miniconda_install_path = app_root_path.join("miniconda3");
+    let miniconda_marker_path = app_root_path.join(".miniconda_installed.marker");
 
-    match python_executable_path_result {
-        Ok(python_path) => {
-            if python_path.exists() && python_path.is_file() {
-                info!("[SETUP_VERIFICATION] Python executable path verified at {:?}", python_path);
-                window.emit("initialization-status", json!({ "status": "progress", "stage": "CheckingPythonPath", "progress": 50, "message": "Python executable found." })).map_err(|e| e.to_string())?;
-            } else {
-                let warning_msg = format!("Bundled Python executable not found or is not a file at resolved path: {:?}. This is expected on first run and will be installed.", python_path);
-                warn!("[SETUP_VERIFICATION] {}", warning_msg);
-                // Emit a warning status or just log and continue. Let's just log and continue for now,
-                // as the full setup will handle the installation.
-                window.emit("initialization-status", json!({ "status": "progress", "stage": "CheckingPythonPath", "progress": 50, "message": warning_msg })).map_err(|e| e.to_string())?;
-            }
-        }
-        Err(e) => {
-            let warning_msg = format!("Failed to determine bundled Python executable path: {}. This is expected on first run and will be installed.", e);
-            warn!("[SETUP_VERIFICATION] {}", warning_msg);
-            // Emit a warning status or just log and continue. Let's just log and continue for now.
-            window.emit("initialization-status", json!({ "status": "progress", "stage": "CheckingPythonPath", "progress": 50, "message": warning_msg })).map_err(|e| e.to_string())?;
-        }
+    if miniconda_install_path.exists() && miniconda_install_path.is_dir() && miniconda_marker_path.exists() && miniconda_marker_path.is_file() {
+        info!("[SETUP_VERIFICATION] Miniconda installation verified at {:?}", miniconda_install_path);
+        window.emit("initialization-status", json!({ "status": "progress", "stage": "CheckingMiniconda", "progress": 50, "message": "Miniconda installation found." })).map_err(|e| e.to_string())?;
+    } else {
+        let warning_msg = format!("Miniconda installation not found or incomplete at {:?}. This is expected on first run and will be installed.", miniconda_install_path);
+        warn!("[SETUP_VERIFICATION] {}", warning_msg);
+        window.emit("initialization-status", json!({ "status": "progress", "stage": "CheckingMiniconda", "progress": 50, "message": warning_msg })).map_err(|e| e.to_string())?;
     }
     info!("[SETUP_VERIFICATION] Check 2 completed in {:?}", check_2_start.elapsed());
     
@@ -195,7 +185,7 @@ pub async fn run_quick_verification(app_handle: &AppHandle<Wry>) -> Result<bool,
     info!("[QUICK VERIFY] Starting quick verification process...");
 
     let comfyui_dir = get_comfyui_directory_path(app_handle)?;
-    let _venv_python_executable = get_venv_python_executable_path(app_handle)?;
+    let _venv_python_executable = get_conda_env_python_executable_path(app_handle, "comfyui_env").await?;
     // venv_dir can be derived if needed: venv_python_executable.parent().unwrap().parent().unwrap()
     // For the check, we primarily need comfyui_dir and venv_python_executable.
     // Let's get venv_dir explicitly for the check.
@@ -205,23 +195,6 @@ pub async fn run_quick_verification(app_handle: &AppHandle<Wry>) -> Result<bool,
     // Quick verification should only check for the presence of core files/directories placed by the build script.
     // The .venv and its contents are created during the full setup, so they should not be checked here.
 
-    // 1. Check for vendor/python directory
-    let python_dir = get_bundled_python_executable_path(app_handle)?.parent().ok_or("Failed to get parent of python executable")?.to_path_buf();
-    info!("[QUICK VERIFY] Checking for vendor/python directory at {}", python_dir.display());
-    if !python_dir.exists() || !python_dir.is_dir() {
-        info!("[QUICK VERIFY] FAILED: vendor/python directory not found at {}", python_dir.display());
-        return Ok(false);
-    }
-    info!("[QUICK VERIFY] PASSED: vendor/python directory found.");
-
-    // 2. Check for vendor/python/python.exe (or equivalent)
-    let python_executable = get_bundled_python_executable_path(app_handle)?;
-    info!("[QUICK VERIFY] Checking for Python executable at {}", python_executable.display());
-    if !python_executable.exists() || !python_executable.is_file() {
-        info!("[QUICK VERIFY] FAILED: Python executable not found at {}", python_executable.display());
-        return Ok(false);
-    }
-    info!("[QUICK VERIFY] PASSED: Python executable exists.");
 
     // 3. Check for vendor/comfyui directory
     let comfyui_dir = get_comfyui_directory_path(app_handle)?;
@@ -283,11 +256,39 @@ pub async fn check_ipadapter_plus_directory_exists(
 }
 
 
+// Helper to dynamically create a Python script that checks for a package import.
+async fn create_verification_script(app_handle: &AppHandle<Wry>, package_name: &str) -> Result<PathBuf, String> {
+    let script_content = format!(
+r#"
+import sys
+try:
+    import {package}
+    print(f"Successfully imported {package}")
+    sys.exit(0)
+except ImportError as e:
+    print(f"Failed to import {package}: {{e}}", file=sys.stderr)
+    sys.exit(1)
+"#,
+        package = package_name
+    );
+
+    let temp_dir = app_handle.path().app_cache_dir().map_err(|e| e.to_string())?;
+    if !temp_dir.exists() {
+        tokio::fs::create_dir_all(&temp_dir).await.map_err(|e| e.to_string())?;
+    }
+    let script_path = temp_dir.join(format!("verify_{}.py", package_name));
+    
+    let mut file = tokio::fs::File::create(&script_path).await.map_err(|e| e.to_string())?;
+    file.write_all(script_content.as_bytes()).await.map_err(|e| e.to_string())?;
+    
+    Ok(script_path)
+}
+
+
 /// Checks if a Python package can be imported by running a specific script in the ComfyUI venv.
 pub async fn check_python_package_import(
     app_handle: &AppHandle<Wry>,
     package_name_for_log: &str, // e.g., "onnxruntime"
-    script_name: &str,          // e.g., "script_check_onnx.py"
     venv_python_executable: &Path,
     comfyui_base_path: &Path, // For working directory
 ) -> Result<(), String> {
@@ -295,8 +296,8 @@ pub async fn check_python_package_import(
     info!("[VERIFY] Starting: {}", step_name);
     app_handle.emit(EVT_VERIFICATION_STEP_START, json!({ "stepName": step_name.clone() })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_START, e))?;
 
-    let script_path = get_util_script_path(app_handle, script_name)?; // Use aliased util function
-    info!("[VERIFY] Using script: {} for {}", script_path.display(), package_name_for_log);
+    let script_path = create_verification_script(app_handle, package_name_for_log).await?;
+    info!("[VERIFY] Using dynamically created script: {} for {}", script_path.display(), package_name_for_log);
     info!("[VERIFY] Using Python executable: {}", venv_python_executable.display());
     info!("[VERIFY] Using ComfyUI base path as CWD: {}", comfyui_base_path.display());
 
@@ -313,69 +314,37 @@ pub async fn check_python_package_import(
         return Err(err_msg);
     }
 
-    let mut command = Command::new(venv_python_executable);
-    command.arg(&script_path);
-    command.current_dir(comfyui_base_path);
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
+    let command = app_handle.shell().command(venv_python_executable.to_string_lossy().as_ref())
+        .arg(&script_path)
+        .current_dir(comfyui_base_path.to_string_lossy().as_ref());
 
-    info!("[VERIFY] Executing command: {:?} with CWD: {}", command, comfyui_base_path.display());
+    info!("[VERIFY] Executing managed command: {:?} with CWD: {}", command, comfyui_base_path.display());
 
-    let mut child = command.spawn().map_err(|e| {
+    let result = ProcessManager::spawn_and_wait_for_process(
+        app_handle,
+        command,
+        &format!("verify_import_{}", package_name_for_log)
+    ).await.map_err(|e| {
         let err_msg = format!("Failed to spawn verification script for {}: {}", package_name_for_log, e);
         error!("[VERIFY] {}", err_msg);
-        // Emit event for spawn failure
-        app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name.clone(), "error": err_msg.clone(), "details": null })).unwrap_or_else(|emit_err| error!("Failed to emit {} event after spawn error: {}", EVT_VERIFICATION_STEP_FAILED, emit_err));
+        app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name.clone(), "error": err_msg.clone(), "details": null })).ok();
         err_msg
     })?;
 
-    let mut stdout_lines = Vec::new();
-    if let Some(stdout) = child.stdout.take() {
-        let reader = BufReader::new(stdout);
-        for line_result in reader.lines() {
-            match line_result {
-                Ok(line) => {
-                    info!("[VERIFY][{}_stdout] {}", package_name_for_log, line);
-                    stdout_lines.push(line);
-                }
-                Err(e) => warn!("[VERIFY][{}_stdout] Error reading line: {}", package_name_for_log, e),
-            }
-        }
-    }
+    let success = result.exit_code.map_or(false, |c| c == 0) && result.signal.is_none();
 
-    let mut stderr_lines = Vec::new();
-    if let Some(stderr) = child.stderr.take() {
-        let reader = BufReader::new(stderr);
-        for line_result in reader.lines() {
-            match line_result {
-                Ok(line) => {
-                    error!("[VERIFY][{}_stderr] {}", package_name_for_log, line); // Log stderr as error
-                    stderr_lines.push(line);
-                }
-                Err(e) => warn!("[VERIFY][{}_stderr] Error reading line: {}", package_name_for_log, e),
-            }
-        }
-    }
-    
-    let status = child.wait().map_err(|e| {
-        let err_msg = format!("Failed to wait for verification script for {}: {}", package_name_for_log, e);
-        error!("[VERIFY] {}", err_msg);
-         app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name.clone(), "error": err_msg.clone(), "details": null })).unwrap_or_else(|emit_err| error!("Failed to emit {} event after wait error: {}", EVT_VERIFICATION_STEP_FAILED, emit_err));
-        err_msg
-    })?;
-
-    let stdout_str = stdout_lines.join("\n");
-    let stderr_str = stderr_lines.join("\n");
-
-    if status.success() {
+    if success {
+        let stdout_str = result.stdout.join("\n");
         info!("[VERIFY] SUCCESS: {} imported successfully. Output: {}", package_name_for_log, stdout_str);
         app_handle.emit(EVT_VERIFICATION_STEP_SUCCESS, json!({ "stepName": step_name.clone(), "details": stdout_str })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_SUCCESS, e))?;
         Ok(())
     } else {
+        let stdout_str = result.stdout.join("\n");
+        let stderr_str = result.stderr.join("\n");
         let err_msg = format!(
-            "Failed to import {}. Exit code: {}. Stdout: [{}]. Stderr: [{}]",
+            "Failed to import {}. Exit code: {:?}. Stdout: [{}]. Stderr: [{}]",
             package_name_for_log,
-            status.code().map_or_else(|| "N/A".to_string(), |c| c.to_string()),
+            result.exit_code,
             stdout_str,
             stderr_str
         );
@@ -403,7 +372,7 @@ pub async fn check_python_environment_integrity(app_handle: &AppHandle<Wry>) -> 
         }
     };
 
-    let venv_python_executable_result = get_venv_python_executable_path(app_handle);
+    let venv_python_executable_result = get_conda_env_python_executable_path(app_handle, "comfyui_env").await;
     let venv_python_executable = match venv_python_executable_result {
         Ok(path) => path,
         Err(e) => {
@@ -414,27 +383,19 @@ pub async fn check_python_environment_integrity(app_handle: &AppHandle<Wry>) -> 
         }
     };
 
-    let venv_dir = comfyui_dir.join(".venv");
-
-    // 1. Check if .venv directory exists and is a directory
-    info!("[VERIFY] Checking for .venv directory at {}", venv_dir.display());
-    if !venv_dir.exists() || !venv_dir.is_dir() {
-        let err_msg = format!(".venv directory not found or is not a directory at {}", venv_dir.display());
-        warn!("[VERIFY] FAILED: {} - {}", step_name, err_msg);
-        app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name, "error": err_msg.clone(), "details": null })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_FAILED, e))?;
-        return Ok(false);
-    }
-    info!("[VERIFY] PASSED: .venv directory found.");
-
-    // 2. Check if Python executable exists within .venv
-    info!("[VERIFY] Checking for Python executable in .venv at {}", venv_python_executable.display());
+    // 1. Check if Python executable exists within the Conda environment
+    info!("[VERIFY] Checking for Python executable in Conda environment at {}", venv_python_executable.display());
     if !venv_python_executable.exists() || !venv_python_executable.is_file() {
-        let err_msg = format!("Python executable not found in .venv at {}", venv_python_executable.display());
+        let err_msg = format!("Python executable for Conda environment not found at {}", venv_python_executable.display());
         warn!("[VERIFY] FAILED: {} - {}", step_name, err_msg);
         app_handle.emit(EVT_VERIFICATION_STEP_FAILED, json!({ "stepName": step_name, "error": err_msg.clone(), "details": null })).map_err(|e| format!("Failed to emit {}: {}", EVT_VERIFICATION_STEP_FAILED, e))?;
         return Ok(false);
     }
-    info!("[VERIFY] PASSED: Python executable exists in .venv.");
+    info!("[VERIFY] PASSED: Python executable exists in Conda environment.");
+
+    // 2. Verify key package imports (e.g., torch, torchvision, numpy, etc.)
+    // This requires running a Python script within the venv.
+    // We can reuse the check_python_package_import function.
 
     // 3. Verify key package imports (e.g., torch, torchvision, numpy, etc.)
     // This requires running a Python script within the venv.
@@ -444,21 +405,7 @@ pub async fn check_python_environment_integrity(app_handle: &AppHandle<Wry>) -> 
     let mut failed_packages = Vec::new();
 
     for package in packages_to_verify {
-        let script_name = format!("script_check_{}.py", package.replace("-", "_")); // e.g., script_check_torch.py
-        // Create a temporary script file to check import
-        let script_content = format!("import {}\nprint('{} import successful')", package, package);
-        let temp_script_path = comfyui_dir.join(&script_name); // Place temp script in comfyui dir
-
-        if let Err(e) = tokio::fs::write(&temp_script_path, script_content).await {
-            let err_msg = format!("Failed to write temporary verification script {}: {}", script_name, e);
-            error!("[VERIFY] {}", err_msg);
-            // This is a critical error, but we'll continue checking other packages for now.
-            all_packages_ok = false;
-            failed_packages.push(format!("Script write failed for {}: {}", package, e));
-            continue; // Skip to next package
-        }
-
-        match check_python_package_import(app_handle, package, &script_name, &venv_python_executable, &comfyui_dir).await {
+        match check_python_package_import(app_handle, package, &venv_python_executable, &comfyui_dir).await {
             Ok(_) => {
                 info!("[VERIFY] PASSED: {} import successful.", package);
             }
@@ -468,11 +415,6 @@ pub async fn check_python_environment_integrity(app_handle: &AppHandle<Wry>) -> 
                 all_packages_ok = false;
                 failed_packages.push(err_msg);
             }
-        }
-
-        // Clean up the temporary script file
-        if let Err(e) = tokio::fs::remove_file(&temp_script_path).await {
-            warn!("[VERIFY] Failed to remove temporary verification script {}: {}", script_name, e);
         }
     }
 

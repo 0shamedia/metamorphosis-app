@@ -74,7 +74,6 @@ pub use custom_node_manager::{
     clone_comfyui_impact_pack,
     clone_comfyui_impact_subpack,
     clone_comfyui_smz_nodes,
-    clone_rgthree_comfy_nodes,
     clone_repository_to_custom_nodes,
     install_custom_node_dependencies,
 };

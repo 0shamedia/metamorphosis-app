@@ -1,13 +1,17 @@
+use tauri_plugin_log::{Target, TargetKind};
 use std::env;
 use tauri::{Manager, Url}; // Import Url
 use std::time::Duration;
+use std::fs; // Import the fs module for file system operations
 
 mod comfyui_sidecar;       // This file re-exports from sidecar_manager
 mod gpu_detection;
+mod dev_server_manager;    // New module for dev server management
 // mod dependency_management; // Deprecated: Logic moved to setup_manager::dependency_manager
 mod setup;                 // This file re-exports from setup_manager
 pub mod sidecar_manager;   // Declare the new top-level module
 pub mod setup_manager;     // Declare the new top-level module
+pub mod process_manager;   // Declare the new process manager module
 
 // Command to get workflow templates
 #[tauri::command]
@@ -22,18 +26,28 @@ fn get_workflow_template(workflow_type: String) -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  log::set_max_level(log::LevelFilter::Trace); // Set max log level to capture all messages
   let app_start_time = std::time::Instant::now();
   
-  println!("======= METAMORPHOSIS APPLICATION STARTUP =======");
-  println!("Runtime Info: OS: {}, Arch: {}", std::env::consts::OS, std::env::consts::ARCH);
-  println!("Start Time: {:?}", app_start_time);
-  println!("===============================================");
+  log::info!("======= METAMORPHOSIS APPLICATION STARTUP =======");
+  log::info!("Runtime Info: OS: {}, Arch: {}", std::env::consts::OS, std::env::consts::ARCH);
+  log::info!("Start Time: {:?}", app_start_time);
+  log::info!("===============================================");
   
   tauri::Builder::default()
-    .plugin(tauri_plugin_log::Builder::default().build()) // Initialize log plugin first
+    .plugin(
+        tauri_plugin_log::Builder::default()
+            .targets([
+                Target::new(TargetKind::Stdout),
+                Target::new(TargetKind::LogDir { file_name: Some("app.log".into()) }), // Specify log file name
+                Target::new(TargetKind::Webview), // Add Webview target for browser console logs
+            ])
+            .build()
+    ) // Initialize log plugin first
     .plugin(tauri_plugin_fs::init()) // Initialize the FS plugin
     .plugin(tauri_plugin_shell::init()) // Initialize the Shell plugin
     .plugin(tauri_plugin_opener::init()) // Initialize the Opener plugin
+    .manage(process_manager::ProcessManager::new()) // Add the process manager to the state
     .setup(move |app| {
       // Logging should be configured via the plugin initialization above
       log::info!("[STARTUP] App setup started - elapsed: {:?}", app_start_time.elapsed());
@@ -45,9 +59,23 @@ pub fn run() {
       log::info!("[STARTUP] Current executable: {:?}", std::env::current_exe());
       log::info!("[STARTUP] Current directory: {:?}", std::env::current_dir());
       
-      // Log app data directory
+      // Log app data directory and ensure logs subdirectory exists
       match app.handle().path().app_data_dir() {
-          Ok(path) => log::info!("[STARTUP] App data directory: {}", path.display()),
+          Ok(app_data_path) => {
+              log::info!("[STARTUP] App data directory: {}", app_data_path.display());
+              let logs_path = app_data_path.join("logs");
+              
+              // Explicitly create the logs directory if it doesn't exist
+              if !logs_path.exists() {
+                  log::info!("[STARTUP] Logs directory does NOT exist at: {}. Attempting to create...", logs_path.display());
+                  match fs::create_dir_all(&logs_path) {
+                      Ok(_) => log::info!("[STARTUP] Successfully created logs directory at: {}", logs_path.display()),
+                      Err(e) => log::error!("[STARTUP] Failed to create logs directory at {}: {}", logs_path.display(), e),
+                  }
+              } else {
+                  log::info!("[STARTUP] Logs directory already exists at: {}", logs_path.display());
+              }
+          },
           Err(e) => log::error!("[STARTUP] Failed to get app data directory: {}", e),
       }
 
@@ -139,27 +167,44 @@ pub fn run() {
       // Register the new workflow template command
       get_workflow_template
     ])
-    .on_window_event(|window, event| match event {
-        tauri::WindowEvent::Destroyed => {
-            // Ensure this only runs for the main window if multiple windows exist
-            if window.label() == "main" { // Check label for main window
-                log::info!("[LIFECYCLE] Main window destroyed, stopping ComfyUI sidecar");
-                comfyui_sidecar::stop_comfyui_sidecar();
+    .on_window_event(move |window, event| {
+        match event {
+            tauri::WindowEvent::Destroyed => {
+                if window.label() == "main" {
+                    log::info!("[LIFECYCLE] Main window destroyed.");
+                    log::logger().flush();
+                }
             }
-        }
-        tauri::WindowEvent::CloseRequested { .. } => {
-            if window.label() == "main" {
-                log::info!("[LIFECYCLE] Main window close requested");
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                if window.label() == "main" {
+                    log::info!("[LIFECYCLE] Main window close requested. Stopping all managed processes before exit.");
+                    api.prevent_close();
+
+                    let app_handle = window.app_handle().clone();
+
+                    tauri::async_runtime::spawn(async move {
+                        {
+                            let process_manager = app_handle.state::<process_manager::ProcessManager>();
+                            process_manager.shutdown_all_processes().await;
+                        }
+                        log::logger().flush();
+                        log::info!("[LIFECYCLE] All managed processes stopped. Exiting application.");
+                        app_handle.exit(0);
+                    });
+                }
             }
+            _ => {}
         }
-        _ => {}
     })
     .build(tauri::generate_context!())
     .expect("error while building tauri application")
-    .run(move |_app_handle, event| match event { // Handle app exit events too
+    .run(move |app_handle, event| match event {
         tauri::RunEvent::ExitRequested { .. } => {
-            log::info!("[LIFECYCLE] Exit requested, stopping ComfyUI sidecar");
-            comfyui_sidecar::stop_comfyui_sidecar();
+            // This event is triggered when `app_handle.exit(0)` is called.
+            // The actual shutdown logic, including stopping processes, is now handled
+            // in the `on_window_event` handler for `WindowEvent::CloseRequested`.
+            // We leave this empty and DO NOT prevent exit, allowing the application to terminate.
+            log::info!("[LIFECYCLE] Application exit sequence initiated.");
         }
         tauri::RunEvent::Exit => {
              log::info!("[LIFECYCLE] Application exiting - total runtime: {:?}", app_start_time.elapsed());
@@ -170,5 +215,5 @@ pub fn run() {
         _ => {}
     });
   
-  println!("Total initialization time: {:?}", app_start_time.elapsed());
+  log::info!("Total initialization time: {:?}", app_start_time.elapsed());
 }

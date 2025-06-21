@@ -9,7 +9,9 @@ pub use cloning::{
     clone_comfyui_impact_pack,
     clone_comfyui_impact_subpack,
     clone_comfyui_smz_nodes,
-    clone_rgthree_comfy_nodes,
+    clone_comfyui_controlnet_aux,
+    clone_comfyui_clipseg,
+    clone_comfyui_rmbg,
     clone_repository_to_custom_nodes, // Re-export this as it's used by orchestration
 };
 pub use installation::{

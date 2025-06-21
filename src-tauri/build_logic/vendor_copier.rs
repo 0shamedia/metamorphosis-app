@@ -10,7 +10,10 @@ use fs_extra::dir::{copy as fs_extra_copy, CopyOptions as FsExtraCopyOptions};
 fn copy_recursively_std(source: &Path, destination: &Path) -> io::Result<()> {
     eprintln!("cargo:warning=VENDOR_COPIER_STD: Recursively copying (std::fs) from {:?} to {:?}", source, destination);
     if !destination.exists() {
-        fs::create_dir_all(destination)?;
+        fs::create_dir_all(destination).map_err(|e| {
+            eprintln!("cargo:warning=VENDOR_COPIER_STD_ERROR: Failed to create destination directory {:?}: {}", destination, e);
+            e
+        })?;
         eprintln!("cargo:warning=VENDOR_COPIER_STD: Created destination directory: {:?}", destination);
     }
     for entry_result in fs::read_dir(source)? {
@@ -23,8 +26,12 @@ fn copy_recursively_std(source: &Path, destination: &Path) -> io::Result<()> {
             eprintln!("cargo:warning=VENDOR_COPIER_STD: Recursing into directory: {:?}", source_path);
             copy_recursively_std(&source_path, &destination_path)?;
         } else if file_type.is_file() {
-            eprintln!("cargo:warning=VENDOR_COPIER_STD: Copying file: {:?} to {:?}", source_path, destination_path);
-            fs::copy(&source_path, &destination_path)?;
+            eprintln!("cargo:warning=VENDOR_COPIER_STD: Attempting to copy file: {:?} to {:?}", source_path, destination_path);
+            fs::copy(&source_path, &destination_path).map_err(|e| {
+                eprintln!("cargo:warning=VENDOR_COPIER_STD_ERROR: Failed to copy file from {:?} to {:?}: {}", source_path, destination_path, e);
+                e
+            })?;
+            eprintln!("cargo:warning=VENDOR_COPIER_STD: Successfully copied file: {:?}", destination_path);
         } else {
             eprintln!("cargo:warning=VENDOR_COPIER_STD: Skipping non-file/non-dir: {:?}", source_path);
         }
@@ -114,6 +121,7 @@ fn copy_directory_contents(
 
 
 pub fn copy_vendor_directories(
+    metamorphosis_app_dir: &Path, // Added to get access to src-tauri/scripts
     source_vendor_dir: &Path, // e.g., metamorphosis-app/vendor/
     dest_vendor_dir: &Path,   // e.g., metamorphosis-app/target/debug/vendor/
     force_std_fs_copy: bool,
@@ -152,6 +160,22 @@ pub fn copy_vendor_directories(
         copy_directory_contents(&source_comfyui_path, &target_comfyui_dest_base, "ComfyUI", force_std_fs_copy)?;
         eprintln!("cargo:warning=VENDOR_COPIER: [ComfyUI] Content copy process completed.");
 
+        // --- Copy check_torch.py from scripts to ComfyUI vendor directory ---
+        let script_check_torch_source = metamorphosis_app_dir.join("src-tauri/scripts/script_check_torch.py");
+        let check_torch_dest = target_comfyui_dest_base.join("check_torch.py");
+
+        eprintln!("cargo:warning=VENDOR_COPIER: Attempting to copy script_check_torch.py to ComfyUI vendor directory.");
+        eprintln!("cargo:warning=VENDOR_COPIER: Source: {:?}", script_check_torch_source);
+        eprintln!("cargo:warning=VENDOR_COPIER: Destination: {:?}", check_torch_dest);
+
+        if script_check_torch_source.exists() {
+            fs::copy(&script_check_torch_source, &check_torch_dest)
+                .map_err(|e| format!("Failed to copy check_torch.py from {:?} to {:?}: {}", script_check_torch_source, check_torch_dest, e))?;
+            eprintln!("cargo:warning=VENDOR_COPIER: Successfully copied script_check_torch.py to check_torch.py.");
+        } else {
+            eprintln!("cargo:warning=VENDOR_COPIER_WARN: script_check_torch.py not found at {:?}. Skipping copy.", script_check_torch_source);
+        }
+
         // Verification
         let check_main_py = target_comfyui_dest_base.join("main.py");
         if !check_main_py.exists() {
@@ -172,67 +196,13 @@ pub fn copy_vendor_directories(
         }
         eprintln!("cargo:warning=VENDOR_COPIER_VERIFY: [ComfyUI] main.py FOUND in target: {:?}", check_main_py);
     } else {
-        let err_msg = format!("[ComfyUI] Source directory not found: {:?}", source_comfyui_path);
+        let err_msg = format!("[ComfyUI] Source directory not found or not a directory: {:?}. This is critical and indicates a problem with ComfyUI installation.", source_comfyui_path);
         eprintln!("cargo:warning=VENDOR_COPIER_ERROR: {}", err_msg);
         return Err(err_msg.into());
     }
     eprintln!("cargo:warning=VENDOR_COPIER: [ComfyUI] Section finished.");
     println!("cargo:warning=VENDOR_COPIER: After attempting to copy comfyui directory.");
 
-    // --- Copy Python ---
-    println!("cargo:warning=VENDOR_COPIER: Before attempting to copy python directory.");
-    let source_python_path = source_vendor_dir.join("python");
-    let target_python_dest_base = dest_vendor_dir.join("python"); // e.g. .../target/debug/vendor/python/
-
-    eprintln!("cargo:warning=VENDOR_COPIER: [Python] Preparing to copy Python contents.");
-    eprintln!("cargo:warning=VENDOR_COPIER: [Python] Source Python (contents from): {:?}", &source_python_path);
-    eprintln!("cargo:warning=VENDOR_COPIER: [Python] Target Python (destination for contents): {:?}", &target_python_dest_base);
-
-    if source_python_path.is_dir() {
-        // Cleanup existing target Python directory
-        if target_python_dest_base.exists() {
-            eprintln!("cargo:warning=VENDOR_COPIER: [Python] Removing existing target directory: {:?}", &target_python_dest_base);
-            fs::remove_dir_all(&target_python_dest_base).map_err(|e| format!("[Python] Failed to remove existing target Python dir {:?}: {}", target_python_dest_base, e))?;
-        }
-        // copy_directory_contents will create target_python_dest_base if it doesn't exist
-        copy_directory_contents(&source_python_path, &target_python_dest_base, "Python", force_std_fs_copy)?;
-        eprintln!("cargo:warning=VENDOR_COPIER: [Python] Content copy process completed.");
-
-        // Verification
-        let python_exe_name = if cfg!(windows) { "python.exe" } else { "python" };
-        let python_exe_subdir = if cfg!(windows) { "" } else { "bin" }; // Python executable is in 'bin' on Unix-like
-        
-        let check_python_exe: PathBuf = if python_exe_subdir.is_empty() {
-            target_python_dest_base.join(python_exe_name)
-        } else {
-            target_python_dest_base.join(python_exe_subdir).join(python_exe_name)
-        };
-
-        if !check_python_exe.exists() {
-             let err_msg = format!(
-                "CRITICAL VENDOR_COPIER ERROR: Python executable ({}) NOT found in target vendor directory after copy. Checked: {:?}",
-                python_exe_name, check_python_exe
-            );
-            eprintln!("cargo:warning={}", err_msg);
-            eprintln!("cargo:warning=VENDOR_COPIER_DIAG: [Python] Contents of {:?}:", target_python_dest_base);
-            if target_python_dest_base.exists() {
-                for entry in fs::read_dir(&target_python_dest_base)? {
-                     eprintln!("cargo:warning=VENDOR_COPIER_DIAG: [Python]   - {:?}", entry?.path());
-                }
-            } else {
-                eprintln!("cargo:warning=VENDOR_COPIER_DIAG: [Python] Target directory {:?} does not exist.", target_python_dest_base);
-            }
-            return Err(err_msg.into());
-        }
-        eprintln!("cargo:warning=VENDOR_COPIER_VERIFY: [Python] Python executable ({}) FOUND in target: {:?}", python_exe_name, check_python_exe);
-
-    } else {
-        let err_msg = format!("[Python] Source Python directory not found: {:?}", source_python_path);
-        eprintln!("cargo:warning=VENDOR_COPIER_ERROR: {}", err_msg);
-        // This is critical because python_installer should have placed it there.
-        return Err(err_msg.into());
-    }
-    eprintln!("cargo:warning=VENDOR_COPIER: [Python] Section finished.");
     println!("cargo:warning=VENDOR_COPIER: After attempting to copy python directory.");
 
     eprintln!("cargo:warning=VENDOR_COPIER: Vendor directory copying finished successfully.");

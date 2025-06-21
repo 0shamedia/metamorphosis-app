@@ -122,7 +122,7 @@ export default function SetupScreenComponent({ onComplete }: SetupScreenProps) {
       finalizing: 5
       // 'installing_comfyui' is removed from weighted phases
     };
-    const phaseOrder: SetupPhase[] = ['checking', 'python_setup', 'installing_custom_nodes', 'verifying_dependencies', 'downloading_models', 'finalizing'];
+    const phaseOrder: SetupPhase[] = ['checking', 'python_setup', 'installing_custom_nodes', 'verifying_dependencies', 'downloading_models', 'finalizing', 'complete']; // Added 'complete'
     const currentPhaseIndex = phaseOrder.indexOf(setupProgress.phase);
 
     if (setupProgress.phase === 'complete') return 100;

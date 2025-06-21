@@ -5,7 +5,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use log::{info, error, debug};
 use crate::setup_manager::event_utils::emit_event;
-use tauri::{AppHandle, Wry, path::BaseDirectory, Manager}; // Added BaseDirectory and Manager
+use tauri::{AppHandle, Wry, Manager};
 use serde_json::json;
 use std::env; // Added for env! macro
 
@@ -86,30 +86,98 @@ pub fn get_bundled_python_executable_path(app_handle: &AppHandle<Wry>) -> Result
     }
 }
 
-/// Returns the absolute path to the Python executable within the ComfyUI virtual environment.
-pub fn get_venv_python_executable_path(app_handle: &AppHandle<Wry>) -> Result<PathBuf, String> {
-    let comfyui_dir = get_comfyui_directory_path(app_handle)?;
-    let venv_dir = comfyui_dir.join(".venv");
-    let python_exe_name = if cfg!(windows) { "python.exe" } else { "python" };
-    let script_folder = if cfg!(windows) { "Scripts" } else { "bin" };
+/// Determines the absolute path to the `conda` executable.
+/// Initially, it tries to find `conda` in the system's PATH.
+/// In a future iteration, this will be updated to point to a bundled Miniconda installation.
+pub async fn get_conda_executable_path(app_handle: &AppHandle<Wry>) -> Result<PathBuf, String> {
+    // Get the application's root path
+    let app_root_path = crate::setup_manager::orchestration::get_app_root_path()?;
+    // Construct the expected Miniconda installation path relative to the app root
+    let miniconda_install_path = app_root_path.join(crate::setup_manager::orchestration::MINICONDA_INSTALL_DIR_NAME);
 
-    Ok(venv_dir.join(script_folder).join(python_exe_name))
+    let conda_exe_path_in_scripts = miniconda_install_path.join("Scripts").join("conda.exe");
+    let conda_exe_path_direct = miniconda_install_path.join("conda.exe");
+    let conda_exe_path_in_bin = miniconda_install_path.join("bin").join("conda"); // For non-Windows
+
+    if cfg!(windows) {
+        if conda_exe_path_in_scripts.exists() {
+            info!("Found conda executable at expected path (Scripts): {}", conda_exe_path_in_scripts.display());
+            Ok(conda_exe_path_in_scripts)
+        } else if conda_exe_path_direct.exists() {
+            info!("Found conda executable at expected path (Direct): {}", conda_exe_path_direct.display());
+            Ok(conda_exe_path_direct)
+        } else {
+            let err_msg = format!("Conda executable not found at expected paths: {} or {}", conda_exe_path_in_scripts.display(), conda_exe_path_direct.display());
+            error!("{}", err_msg);
+            Err(err_msg)
+        }
+    } else { // Linux/macOS
+        if conda_exe_path_in_bin.exists() {
+            info!("Found conda executable at expected path (bin): {}", conda_exe_path_in_bin.display());
+            Ok(conda_exe_path_in_bin)
+        } else {
+            let err_msg = format!("Conda executable not found at expected path: {}", conda_exe_path_in_bin.display());
+            error!("{}", err_msg);
+            Err(err_msg)
+        }
+    }
 }
 
-/// Returns the absolute path to a script within the 'scripts' directory (bundled or in src-tauri/scripts for debug).
-pub fn get_script_path(app_handle: &AppHandle<Wry>, script_name: &str) -> Result<PathBuf, String> {
-    if cfg!(debug_assertions) {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("scripts")
-            .join(script_name)
-            .canonicalize()
-            .map_err(|e| format!("Failed to find script '{}' at {:?} in debug mode: {}", script_name, PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts"), e))
+/// Returns the absolute path to the Python executable within the specified Conda environment.
+/// This function assumes that the `conda` executable is found and uses its location
+/// to infer the Miniconda installation root and then the environment's Python path.
+pub async fn get_conda_env_python_executable_path(app_handle: &AppHandle<Wry>, env_name: &str) -> Result<PathBuf, String> {
+    let app_root_path = crate::setup_manager::orchestration::get_app_root_path()?;
+    let miniconda_install_path = app_root_path.join(crate::setup_manager::orchestration::MINICONDA_INSTALL_DIR_NAME);
+
+    let python_exe_name = if cfg!(windows) { "python.exe" } else { "python" };
+
+    // On Windows, the python executable is in <miniconda_root>/envs/<env_name>/python.exe
+    // On Linux/macOS, it's in <miniconda_root>/envs/<env_name>/bin/python
+    let env_python_path = if cfg!(windows) {
+        miniconda_install_path.join("envs").join(env_name).join(python_exe_name)
     } else {
-        app_handle
-            .path()
-            .resolve(&format!("scripts/{}", script_name), BaseDirectory::Resource)
-            .map_err(|e| format!("Failed to resolve script '{}' with BaseDirectory::Resource: {}", script_name, e))
-            // .and_then(|p| p.canonicalize().map_err(|e| format!("Failed to canonicalize script path '{}' in release mode: {}", script_name, e))) // Canonicalize might fail if path is inside archive before extraction
+        miniconda_install_path.join("envs").join(env_name).join("bin").join(python_exe_name)
+    };
+
+    info!("Determined Conda environment Python executable path: {}", env_python_path.display());
+    Ok(env_python_path)
+}
+
+// The get_script_path function has been removed as verification scripts are now created dynamically.
+
+/// Waits for a directory to exist at the given path, with a timeout.
+pub async fn wait_for_directory_to_exist(
+    app_handle: &AppHandle<Wry>,
+    dir_path: &Path,
+    timeout_secs: u64,
+    check_interval_millis: u64,
+    dir_description: &str,
+) -> Result<(), String> {
+    info!("Waiting for {} to exist at: {}", dir_description, dir_path.display());
+    let start_time = tokio::time::Instant::now();
+
+    loop {
+        if dir_path.exists() && dir_path.is_dir() {
+            info!("{} found at: {}", dir_description, dir_path.display());
+            return Ok(());
+        }
+
+        if start_time.elapsed().as_secs() >= timeout_secs {
+            let err_msg = format!(
+                "Timeout waiting for {} to appear at: {}",
+                dir_description,
+                dir_path.display()
+            );
+            error!("{}", err_msg);
+            emit_event(app_handle, "SetupError", Some(serde_json::json!({
+                "message": err_msg.clone(),
+                "detail": format!("Waited for {} seconds.", timeout_secs)
+            })));
+            return Err(err_msg);
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(check_interval_millis)).await;
     }
 }
 
@@ -208,7 +276,12 @@ pub async fn download_file(
     }
     let dest_path = temp_dir.join(dest_name);
 
-    let response = reqwest::get(url).await.map_err(|e| {
+    let client = reqwest::Client::builder()
+        .user_agent("Metamorphosis-App/1.0")
+        .build()
+        .map_err(|e| format!("Failed to build reqwest client: {}", e))?;
+
+    let response = client.get(url).send().await.map_err(|e| {
         let err_msg = format!("Failed to request file from {}: {}", url, e);
         error!("{}", err_msg);
         emit_event(app_handle, "PackageInstallFailed", Some(json!({ "packageName": "insightface_wheel", "error": err_msg.clone(), "osHint": serde_json::Value::Null })));
@@ -263,3 +336,37 @@ pub async fn download_file(
 // TODO: Add idempotency check functions (e.g., for checking if a package is already installed at a specific version)
 // TODO: Add pip update function (e.g., `pip install --upgrade pip`)
 // TODO: Consider moving ONNX Runtime and Insightface installation logic here if they become more generic Python package installations.
+/// Waits for a file to exist at the given path, with a timeout.
+pub async fn wait_for_file_to_exist(
+    app_handle: &AppHandle<Wry>,
+    file_path: &Path,
+    timeout_secs: u64,
+    check_interval_millis: u64,
+    file_description: &str,
+) -> Result<(), String> {
+    info!("Waiting for {} to exist at: {}", file_description, file_path.display());
+    let start_time = tokio::time::Instant::now();
+
+    loop {
+        if file_path.exists() {
+            info!("{} found at: {}", file_description, file_path.display());
+            return Ok(());
+        }
+
+        if start_time.elapsed().as_secs() >= timeout_secs {
+            let err_msg = format!(
+                "Timeout waiting for {} to appear at: {}",
+                file_description,
+                file_path.display()
+            );
+            error!("{}", err_msg);
+            emit_event(app_handle, "SetupError", Some(serde_json::json!({
+                "message": err_msg.clone(),
+                "detail": format!("Waited for {} seconds.", timeout_secs)
+            })));
+            return Err(err_msg);
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(check_interval_millis)).await;
+    }
+}

@@ -17,9 +17,7 @@
 // };
 
 // Public functions are re-exported.
-pub use crate::sidecar_manager::process_handler::{
-    stop_comfyui_sidecar,
-};
+// No functions are re-exported from process_handler anymore, as it's all managed by ProcessManager.
 
 // Public constants (if any were directly used externally from here).
 // COMFYUI_PORT is re-exported from sidecar_manager::event_utils via sidecar_manager::mod.rs

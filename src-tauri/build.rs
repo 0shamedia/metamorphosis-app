@@ -5,7 +5,7 @@ use std::fs; // Keep fs for potential top-level directory creations if needed
 mod build_logic;
 
 // Use items from the new modules
-use build_logic::{paths, python_installer, vendor_copier};
+use build_logic::{paths, vendor_copier, comfyui_installer};
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=build.rs");
@@ -14,8 +14,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:warning=BUILD_RS: Rerun if paths.rs changed.");
     println!("cargo:rerun-if-changed=build_logic/archive_utils.rs");
     println!("cargo:warning=BUILD_RS: Rerun if archive_utils.rs changed.");
-    println!("cargo:rerun-if-changed=build_logic/python_installer.rs");
-    println!("cargo:warning=BUILD_RS: Rerun if python_installer.rs changed.");
     println!("cargo:rerun-if-changed=build_logic/vendor_copier.rs");
     println!("cargo:warning=BUILD_RS: Rerun if vendor_copier.rs changed.");
 
@@ -39,25 +37,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         fs::create_dir_all(&source_vendor_dir)
             .map_err(|e| format!("Failed to create source vendor directory {:?}: {}", source_vendor_dir, e))?;
     }
-    // For `rerun-if-changed` on `requirements.txt`
-    let source_comfyui_requirements = source_vendor_dir.join("comfyui").join("requirements.txt");
-    if source_comfyui_requirements.exists() {
-        println!("cargo:rerun-if-changed={}", source_comfyui_requirements.display());
-        eprintln!("cargo:warning=BUILD_RS_MAIN: Watching source requirements.txt: {:?}", source_comfyui_requirements);
-    } else {
-        eprintln!("cargo:warning=BUILD_RS_MAIN: Source requirements.txt not found at {:?}, not watching.", source_comfyui_requirements);
-    }
+
+    // --- 1.5. Ensure ComfyUI Base is Installed in Source Vendor ---
+    eprintln!("cargo:warning=BUILD_RS_MAIN: Stage 1.5: Ensuring ComfyUI is installed in source vendor directory.");
+    comfyui_installer::ensure_comfyui_base_installed(&metamorphosis_app_dir)
+        .map_err(|e| format!("ComfyUI base installation failed: {}", e))?;
+    eprintln!("cargo:warning=BUILD_RS_MAIN: ComfyUI base installation in source vendor directory ensured.");
 
 
-    // --- 2. Ensure Python is Installed in Source Vendor ---
-    eprintln!("cargo:warning=BUILD_RS_MAIN: Stage 2: Ensuring Python is installed in source vendor directory.");
-    python_installer::ensure_python_installed(&source_vendor_dir, &out_dir)
-        .map_err(|e| format!("Python installation failed: {}", e))?;
-    eprintln!("cargo:warning=BUILD_RS_MAIN: Python installation in source vendor directory ensured.");
 
 
-    // --- 3. Copy Vendor Directories to Build Output ---
-    eprintln!("cargo:warning=BUILD_RS_MAIN: Stage 3: Copying vendor directories to build output.");
+    // --- 2. Copy Vendor Directories to Build Output ---
+    eprintln!("cargo:warning=BUILD_RS_MAIN: Stage 2: Copying vendor directories to build output.");
     let target_profile_dir = paths::get_target_profile_dir(&metamorphosis_app_dir)?;
     let dest_vendor_dir = paths::get_dest_vendor_dir(&target_profile_dir);
 
@@ -65,12 +56,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let force_std_fs_copy = true; 
     eprintln!("cargo:warning=BUILD_RS_MAIN: Forcing std::fs for vendor copy: {}", force_std_fs_copy);
 
-    vendor_copier::copy_vendor_directories(&source_vendor_dir, &dest_vendor_dir, force_std_fs_copy)
+    vendor_copier::copy_vendor_directories(&metamorphosis_app_dir, &source_vendor_dir, &dest_vendor_dir, force_std_fs_copy)
         .map_err(|e| format!("Vendor directory copying failed: {}", e))?;
     eprintln!("cargo:warning=BUILD_RS_MAIN: Vendor directories copied to build output.");
 
-    // --- 4. Tauri Build ---
-    eprintln!("cargo:warning=BUILD_RS_MAIN: Stage 4: Running Tauri build.");
+    // --- 3. Tauri Build ---
+    eprintln!("cargo:warning=BUILD_RS_MAIN: Stage 3: Running Tauri build.");
     tauri_build::build();
     eprintln!("cargo:warning=BUILD_RS_MAIN: Tauri build finished.");
 

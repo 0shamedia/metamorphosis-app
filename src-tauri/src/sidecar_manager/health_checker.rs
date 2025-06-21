@@ -1,6 +1,6 @@
 // metamorphosis-app/src-tauri/src/sidecar_manager/health_checker.rs
 
-use tauri::{AppHandle, Wry, async_runtime, Emitter};
+use tauri::{AppHandle, Wry, async_runtime, Emitter, Manager};
 use tauri_plugin_http::reqwest;
 use tokio::time::{interval, Duration};
 use log::{info, error};
@@ -11,9 +11,10 @@ use std::error::Error as StdError; // Alias to avoid conflict
 
 // Internal imports from sibling modules
 use super::event_utils::{emit_backend_status, COMFYUI_PORT};
+use crate::process_manager::ProcessManager;
 use super::process_handler::{
-    COMFYUI_CHILD_PROCESS, RESTART_ATTEMPTS, LAST_RESTART_TIME, MAX_RESTARTS_PER_HOUR,
-    stop_comfyui_sidecar, spawn_comfyui_process,
+    RESTART_ATTEMPTS, LAST_RESTART_TIME, MAX_RESTARTS_PER_HOUR,
+    spawn_comfyui_process,
 };
 
 // Function to perform initial health check after spawning
@@ -62,7 +63,8 @@ pub(super) async fn perform_comfyui_health_check(app_handle: AppHandle<Wry>) -> 
     let err_msg = "ComfyUI failed initial health check after multiple attempts.".to_string();
     error!("{}", err_msg);
     emit_backend_status(&app_handle, "backend_error", err_msg.clone(), true);
-    stop_comfyui_sidecar(); 
+    let process_manager = app_handle.state::<ProcessManager>();
+    process_manager.stop_process("comfyui_sidecar");
     Err(err_msg)
 }
 
@@ -77,10 +79,8 @@ pub async fn monitor_comfyui_health(app_handle: AppHandle<Wry>) {
     loop {
         interval.tick().await; 
 
-        let is_running = {
-            let child_process_guard = COMFYUI_CHILD_PROCESS.lock().unwrap();
-            child_process_guard.is_some()
-        }; 
+        let process_manager = app_handle.state::<ProcessManager>();
+        let is_running = process_manager.is_process_running("comfyui_sidecar");
 
         if !is_running {
             info!("ComfyUI process is not running, attempting to restart...");
@@ -135,7 +135,8 @@ pub async fn monitor_comfyui_health(app_handle: AppHandle<Wry>) {
                     }
                 } else {
                     error!("ComfyUI health check failed: Received non-success status code: {}", response.status());
-                    stop_comfyui_sidecar(); 
+                    let process_manager = app_handle.state::<ProcessManager>();
+                    process_manager.stop_process("comfyui_sidecar");
                 }
             }
             Err(e) => {
@@ -148,7 +149,8 @@ pub async fn monitor_comfyui_health(app_handle: AppHandle<Wry>) {
                      error_msg.push_str(&format!(" Source: {}", source));
                  }
                  error!("{}", error_msg);
-                stop_comfyui_sidecar(); 
+                 let process_manager = app_handle.state::<ProcessManager>();
+                 process_manager.stop_process("comfyui_sidecar");
             }
         }
     }

@@ -1,4 +1,8 @@
+comfyui-frontend-package==1.21.7
+comfyui-workflow-templates==0.1.25
+comfyui-embedded-docs==0.2.0
 torch
+torchsde
 torchvision
 torchaudio
 numpy>=1.25.0
@@ -14,13 +18,13 @@ Pillow
 scipy
 tqdm
 psutil
-torchsde
-comfyui-workflow-templates
+alembic
+SQLAlchemy
 
 #non essential dependencies:
 kornia>=0.7.1
 spandrel
 soundfile
-av>=14.1.0
+av>=14.2.0
 pydantic~=2.0
-onnxruntime
+pydantic-settings~=2.0

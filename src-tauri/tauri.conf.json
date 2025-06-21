@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "node scripts/start-dev-server.js",
     "beforeBuildCommand": "npm run build"
   },
   "app": {
@@ -73,7 +73,6 @@
     "resources": [
       "../resources/workflows/face_workflow_template.json",
       "../resources/workflows/fullbody_workflow_template.json",
-      "../vendor/comfyui/requirements.txt",
       "scripts/script_check_onnx.py",
       "scripts/script_check_insightface.py"
     ]

@@ -44,3 +44,7 @@ next-env.d.ts
 vendor/python/
 
 target/
+
+# Ignore Miniconda environment
+miniconda3/
+miniconda_installed.marker

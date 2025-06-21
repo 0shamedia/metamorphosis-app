@@ -13,10 +13,7 @@ pub use orchestration::{
     ensure_comfyui_running_and_healthy,
     spawn_and_health_check_comfyui,
 };
-pub use process_handler::{
-    is_comfyui_process_active,
-    stop_comfyui_sidecar,
-};
+// process_handler functions are no longer public. Use ProcessManager instead.
 
 // Constants like COMFYUI_PORT might be pub from event_utils if needed externally,
 // or just used internally by the modules within sidecar_manager.

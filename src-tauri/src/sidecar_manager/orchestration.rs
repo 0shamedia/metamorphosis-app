@@ -1,6 +1,6 @@
 // metamorphosis-app/src-tauri/src/sidecar_manager/orchestration.rs
 
-use tauri::{AppHandle, Wry, Emitter};
+use tauri::{AppHandle, Wry, Emitter, Manager};
 use log::{info, error};
 use tokio::time::Duration; // For port check delay
 use tauri_plugin_http::reqwest; // For port check client
@@ -8,7 +8,8 @@ use tauri_plugin_http::reqwest; // For port check client
 
 // Internal imports from sibling modules
 use super::event_utils::{emit_backend_status, COMFYUI_PORT};
-use super::process_handler::{spawn_comfyui_process as internal_spawn_comfyui_process, stop_comfyui_sidecar, COMFYUI_CHILD_PROCESS, IS_ATTEMPTING_SPAWN};
+use crate::process_manager::ProcessManager;
+use super::process_handler::{spawn_comfyui_process as internal_spawn_comfyui_process, IS_ATTEMPTING_SPAWN};
 use super::health_checker::{perform_comfyui_health_check, monitor_comfyui_health}; // monitor_comfyui_health is started by perform_comfyui_health_check
 
 // Crate-level imports
@@ -98,8 +99,8 @@ pub async fn spawn_and_health_check_comfyui(app_handle: &AppHandle<Wry>) -> Resu
     });
 
     // Check 2: Is ComfyUI process already active?
-    // This lock for COMFYUI_CHILD_PROCESS is separate and also short-lived.
-    if COMFYUI_CHILD_PROCESS.lock().unwrap().is_some() {
+    let process_manager = app_handle.state::<ProcessManager>();
+    if process_manager.is_process_running("comfyui_sidecar") {
         info!("[GUARD] spawn_and_health_check_comfyui: ComfyUI process is already active (checked after IS_ATTEMPTING_SPAWN logic). Performing health check.");
         emit_backend_status(app_handle, "already_running_quick_check", "ComfyUI appears to be already running. Verifying health...".to_string(), false);
         
@@ -212,7 +213,8 @@ pub async fn spawn_and_health_check_comfyui(app_handle: &AppHandle<Wry>) -> Resu
     let err_msg = "ComfyUI failed initial health check after multiple attempts (setup flow).".to_string();
     error!("{}", err_msg);
     setup::emit_setup_progress(app_handle, "error", "ComfyUI Health Check Failed", current_phase_progress, Some(err_msg.clone()), Some(err_msg.clone()));
-    stop_comfyui_sidecar();
+    let process_manager = app_handle.state::<ProcessManager>();
+    process_manager.stop_process("comfyui_sidecar");
     Err(err_msg)
 }
 
@@ -221,7 +223,8 @@ pub async fn ensure_comfyui_running_and_healthy(app_handle: AppHandle<Wry>) -> R
     log::error!("[EARLY_CALL_DEBUG] ensure_comfyui_running_and_healthy INVOKED");
     info!("[COMFYUI LIFECYCLE] ensure_comfyui_running_and_healthy called.");
 
-    if COMFYUI_CHILD_PROCESS.lock().unwrap().is_some() {
+    let process_manager = app_handle.state::<ProcessManager>();
+    if process_manager.is_process_running("comfyui_sidecar") {
         info!("[COMFYUI LIFECYCLE] ComfyUI process is already considered active or starting. Attempting health check.");
         // If it's already running, perform a health check.
         // perform_comfyui_health_check will emit appropriate statuses.
