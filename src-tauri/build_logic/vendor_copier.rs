@@ -151,14 +151,15 @@ pub fn copy_vendor_directories(
     eprintln!("cargo:warning=VENDOR_COPIER: [ComfyUI] Target (destination for contents): {:?}", &target_comfyui_dest_base);
 
     if source_comfyui_path.is_dir() {
-        // Cleanup existing target ComfyUI directory before copying contents
-        if target_comfyui_dest_base.exists() {
-            eprintln!("cargo:warning=VENDOR_COPIER: [ComfyUI] Removing existing target directory: {:?}", &target_comfyui_dest_base);
-            fs::remove_dir_all(&target_comfyui_dest_base).map_err(|e| format!("[ComfyUI] Failed to remove existing target dir {:?}: {}", target_comfyui_dest_base, e))?;
+        let check_main_py = target_comfyui_dest_base.join("main.py");
+        if check_main_py.exists() {
+            eprintln!("cargo:warning=VENDOR_COPIER_VERIFY: [ComfyUI] main.py already exists in target. Skipping copy. Checked: {:?}", check_main_py);
+        } else {
+            eprintln!("cargo:warning=VENDOR_COPIER: [ComfyUI] main.py not found in target. Proceeding with copy.");
+            // copy_directory_contents will create target_comfyui_dest_base if it doesn't exist
+            copy_directory_contents(&source_comfyui_path, &target_comfyui_dest_base, "ComfyUI", force_std_fs_copy)?;
+            eprintln!("cargo:warning=VENDOR_COPIER: [ComfyUI] Content copy process completed.");
         }
-        // copy_directory_contents will create target_comfyui_dest_base if it doesn't exist
-        copy_directory_contents(&source_comfyui_path, &target_comfyui_dest_base, "ComfyUI", force_std_fs_copy)?;
-        eprintln!("cargo:warning=VENDOR_COPIER: [ComfyUI] Content copy process completed.");
 
         // --- Copy check_torch.py from scripts to ComfyUI vendor directory ---
         let script_check_torch_source = metamorphosis_app_dir.join("src-tauri/scripts/script_check_torch.py");

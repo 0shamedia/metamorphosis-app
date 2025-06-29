@@ -1,9 +1,11 @@
-use log::{error, info, debug};
+use log::{error, info, warn};
 use tauri_plugin_shell::process::{Command, CommandEvent};
+use tauri_plugin_shell::ShellExt;
 use tauri::{AppHandle, Manager, Wry};
 use tauri_plugin_shell::process::CommandChild;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Manages all active child processes spawned by the application.
@@ -82,11 +84,14 @@ impl ProcessManager {
                     CommandEvent::Error(e) => {
                         error!("Error from managed process '{}': {}", name, e);
                     }
-                     CommandEvent::Stdout(line) => {
-                        debug!("[{}_stdout] {}", name, String::from_utf8_lossy(&line));
+                    CommandEvent::Stdout(line) => {
+                        info!("[{}_stdout] {}", name, String::from_utf8_lossy(&line));
                     }
                     CommandEvent::Stderr(line) => {
-                        debug!("[{}_stderr] {}", name, String::from_utf8_lossy(&line));
+                        // Stderr should probably be at a higher level, like warn! or error!
+                        // For now, let's use info! to ensure visibility, but we can refine this.
+                        // Let's use warn! to make it stand out.
+                        warn!("[{}_stderr] {}", name, String::from_utf8_lossy(&line));
                     }
                     _ => {}
                 }
@@ -108,7 +113,7 @@ impl ProcessManager {
     /// This is for setup steps or any command where the result is needed before proceeding.
     pub async fn spawn_and_wait_for_process(
         app_handle: &AppHandle<Wry>,
-        mut command: Command,
+        command: Command,
         process_base_name: &str,
     ) -> Result<CommandResult, String> {
         let process_name = format!("{}_{}", process_base_name, Uuid::new_v4());
@@ -170,27 +175,91 @@ impl ProcessManager {
     }
 
 
-    /// Shuts down all tracked processes.
+    /// Shuts down all tracked processes gracefully.
     /// This should be called during the application's shutdown sequence.
-    pub async fn shutdown_all_processes(&self) {
+    /// It sends a kill signal and waits for each process to terminate, with a timeout.
+    /// Shuts down all tracked processes gracefully.
+    /// This should be called during the application's shutdown sequence.
+    /// It sends a kill signal and waits for each process to terminate, with a timeout.
+    pub async fn shutdown_all_processes(&self, app_handle: &AppHandle<Wry>) {
         info!("Shutting down all managed processes...");
-        let mut processes_map = self.active_processes.lock().unwrap();
-        if processes_map.is_empty() {
-            info!("No active processes to shut down.");
-            return;
+        let shell = app_handle.shell();
+
+        let processes_to_kill: Vec<(String, u32)> = {
+            let processes_map = self.active_processes.lock().unwrap();
+            if processes_map.is_empty() {
+                info!("No active processes to shut down.");
+                return;
+            }
+            processes_map
+                .iter()
+                .map(|(name, child)| (name.clone(), child.pid()))
+                .collect()
+        };
+
+        if !processes_to_kill.is_empty() {
+            info!(
+                "Terminating processes: {:?}",
+                processes_to_kill
+                    .iter()
+                    .map(|(n, p)| format!("{}({})", n, p))
+                    .collect::<Vec<_>>()
+            );
         }
 
-        let process_names: Vec<String> = processes_map.keys().cloned().collect();
-        info!("Terminating processes: {:?}", process_names);
+        for (name, pid) in processes_to_kill {
+            info!("Attempting to kill process: {} (PID: {})", name, pid);
+            let kill_command = if cfg!(windows) {
+                shell.command("taskkill").args(["/F", "/PID", &pid.to_string()])
+            } else {
+                shell.command("kill").args(["-9", &pid.to_string()])
+            };
 
-        // Drain the map to take ownership of the children
-        for (name, child) in processes_map.drain() {
-            info!("Attempting to kill process: {}", name);
-            match child.kill() {
-                Ok(_) => info!("Successfully sent kill signal to process: {}", name),
-                Err(e) => error!("Failed to kill process '{}': {}", name, e),
+            match kill_command.output().await {
+                Ok(output) if output.status.success() => {
+                    info!(
+                        "Successfully sent kill signal to process: {} (PID: {})",
+                        name, pid
+                    );
+                }
+                Ok(output) => {
+                    error!(
+                        "Kill command for process '{}' (PID: {}) failed with status: {:?}. Stderr: {}",
+                        name,
+                        pid,
+                        output.status,
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to execute kill command for process '{}' (PID: {}): {}",
+                        name, pid, e
+                    );
+                }
+            }
+
+            let wait_for_termination = async {
+                let check_interval = Duration::from_millis(100);
+                loop {
+                    if !self.is_process_running(&name) {
+                        info!("Process '{}' terminated successfully.", name);
+                        break;
+                    }
+                    tokio::time::sleep(check_interval).await;
+                }
+            };
+
+            if let Err(_) = tokio::time::timeout(Duration::from_secs(5), wait_for_termination).await
+            {
+                error!(
+                    "Timeout reached while waiting for process '{}' to terminate. Force-removing from tracking.",
+                    name
+                );
+                self.active_processes.lock().unwrap().remove(&name);
             }
         }
-        info!("All tracked processes have been terminated.");
+
+        info!("All tracked processes have been signaled for termination.");
     }
 }

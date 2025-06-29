@@ -54,7 +54,6 @@ pub enum ModelType {
     Checkpoint,
     VAE,
     LoRA,
-    CLIPVision,
     IPAdapter,
     ControlNet,
     Upscaler, // Example, adjust as needed

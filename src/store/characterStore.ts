@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { CharacterAttributes, Tag, ImageOption } from '../types/character'; // ImageOption is now imported
+import { CharacterAttributes, Tag, ImageOption } from '../types/character';
+import { GenerationMode } from '../types/generation';
 
 export type CharacterCreationStep = 'attributes' | 'faceSelection' | 'bodySelection' | 'finalized';
 
@@ -37,9 +38,16 @@ interface CharacterState {
   // State for finalized character
   characterId: string | null;
   savedFaceImagePath: string | null;
-  savedFullBodyImagePath: string | null;
+  savedBodyImagePath: string | null;
   faceSeed: string | number | null;
   bodySeed: string | number | null;
+
+  // Temporary state for received images from WebSocket
+  latestImageBlob: Blob | null;
+  latestImageUrl: string | null;
+
+  // V3 State
+  lastGenerationMode: GenerationMode | null;
 }
 
 interface CharacterActions {
@@ -67,10 +75,19 @@ interface CharacterActions {
     characterId: string;
     attributes: CharacterAttributes; // Pass all attributes again to ensure consistency
     savedFaceImagePath: string;
-    savedFullBodyImagePath: string;
+    savedBodyImagePath: string;
     faceSeed: string | number;
     bodySeed: string | number;
   }) => void;
+
+  // Action for temporary image
+  setLatestImage: (blob: Blob | null, url: string | null) => void;
+
+  // V3 Actions
+  setLastGenerationMode: (mode: GenerationMode) => void;
+  setSavedFaceImagePath: (path: string | null) => void;
+  setSavedBodyImagePath: (path: string | null) => void;
+  addImageOption: (imageType: 'face' | 'fullbody', option: ImageOption) => void;
 }
 
 const initialAttributes: CharacterAttributes = {
@@ -105,9 +122,15 @@ const useCharacterStore = create<CharacterState & CharacterActions>((set) => ({
 
   characterId: null,
   savedFaceImagePath: null,
-  savedFullBodyImagePath: null,
+  savedBodyImagePath: null,
   faceSeed: null,
   bodySeed: null,
+
+  latestImageBlob: null,
+  latestImageUrl: null,
+
+  // V3
+  lastGenerationMode: null,
 
   setCharacterAttribute: (attribute, value) =>
     set((state) => ({
@@ -148,7 +171,7 @@ const useCharacterStore = create<CharacterState & CharacterActions>((set) => ({
     characterId: data.characterId,
     attributes: { ...data.attributes }, // Ensure all attributes are captured
     savedFaceImagePath: data.savedFaceImagePath,
-    savedFullBodyImagePath: data.savedFullBodyImagePath,
+    savedBodyImagePath: data.savedBodyImagePath,
     faceSeed: data.faceSeed,
     bodySeed: data.bodySeed,
     creationStep: 'finalized', // Mark as finalized
@@ -161,6 +184,21 @@ const useCharacterStore = create<CharacterState & CharacterActions>((set) => ({
     // isGeneratingFullBody: false,
     // generationProgress: null,
   })),
+
+  setLatestImage: (blob, url) => set(() => ({ latestImageBlob: blob, latestImageUrl: url })),
+
+  // V3
+  setLastGenerationMode: (mode) => set(() => ({ lastGenerationMode: mode })),
+  setSavedFaceImagePath: (path) => set(() => ({ savedFaceImagePath: path })),
+  setSavedBodyImagePath: (path) => set(() => ({ savedBodyImagePath: path })),
+  addImageOption: (imageType, option) => set((state) => {
+    if (imageType === 'face') {
+      return { faceOptions: [...state.faceOptions, option] };
+    } else if (imageType === 'fullbody') {
+      return { fullBodyOptions: [...state.fullBodyOptions, option] };
+    }
+    return {};
+  }),
 
   resetCreationState: () => set(() => ({
     attributes: { ...initialAttributes },
@@ -178,9 +216,12 @@ const useCharacterStore = create<CharacterState & CharacterActions>((set) => ({
     generationProgress: initialGenerationProgress,
     characterId: null,
     savedFaceImagePath: null,
-    savedFullBodyImagePath: null,
+    savedBodyImagePath: null,
     faceSeed: null,
     bodySeed: null,
+    latestImageBlob: null,
+    latestImageUrl: null,
+    lastGenerationMode: null,
   })),
 }));
 

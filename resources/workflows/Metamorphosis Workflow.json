@@ -1,0 +1,1228 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "Metamorphosis_v3.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "4": {
+    "inputs": {
+      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, 3d, rim lighting, portrait, headshot, close-up, BREAK, \nclothed, adult, 1futa, chubby face,\n(dyed hair black with vibrant purple highlights:1.3), cropped bangs,\ncateye, black eyeliner, detailed beautiful eyes, grey eyes, detailed irises, pupils, long eyelashes,\nhuge plump bimbo lips, lip gloss,\nBREAK, simple gradient background, vignetting, volumetric lighting, incredibly detailed skin",
+      "parser": "A1111",
+      "mean_normalization": true,
+      "multi_conditioning": true,
+      "use_old_emphasis_implementation": false,
+      "with_SDXL": false,
+      "ascore": 6,
+      "width": 1024,
+      "height": 1024,
+      "crop_w": 0,
+      "crop_h": 0,
+      "target_width": 1024,
+      "target_height": 1024,
+      "text_g": "",
+      "text_l": "",
+      "smZ_steps": 1,
+      "clip": [
+        "128",
+        0
+      ]
+    },
+    "class_type": "smZ CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode++ (Face Only Positive Prompt)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": "modern, recent, old, oldest, cartoon, anime, graphic, text, painting, crayon, graphite, abstract, glitch, deformed, mutated, ugly, disfigured, lowres, bad anatomy, very displeasing, (worst quality, bad quality:1.2), sketch, jpeg artifacts, signature, watermark, username, conjoined, bad ai-generated, full body, multiple people, blurry background, complex background, nsfw, shiny skin,",
+      "parser": "A1111",
+      "mean_normalization": true,
+      "multi_conditioning": false,
+      "use_old_emphasis_implementation": false,
+      "with_SDXL": false,
+      "ascore": 6,
+      "width": 1024,
+      "height": 1024,
+      "crop_w": 0,
+      "crop_h": 0,
+      "target_width": 1024,
+      "target_height": 1024,
+      "text_g": "",
+      "text_l": "",
+      "smZ_steps": 1,
+      "clip": [
+        "128",
+        0
+      ]
+    },
+    "class_type": "smZ CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode++ (Face Only Negative Prompt)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "seed": 31092314071745,
+      "steps": 20,
+      "cfg": 5,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "karras",
+      "denoise": 1,
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "latent_image": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "9": {
+    "inputs": {
+      "samples": [
+        "8",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "11": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "34": {
+    "inputs": {
+      "seed": 285322571540320,
+      "steps": 20,
+      "cfg": 5,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "karras",
+      "denoise": 1,
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "37",
+        0
+      ],
+      "negative": [
+        "38",
+        0
+      ],
+      "latent_image": [
+        "35",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "35": {
+    "inputs": {
+      "width": 768,
+      "height": 1344,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "37": {
+    "inputs": {
+      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, scenery, 3d, rim lighting, BREAK,\nadult, 1futa, front view, chubby body,\nbeautiful face, (dyed hair black with vibrant purple highlights:1.2), cropped bangs,\ncateye, black eyeliner, detailed beautiful eyes, gray eyes, long eyelashes,\nhuge plump bimbo lips, lip gloss, looking at viewer,\npurple t-shirt, black yoga pants with vibrant purple side stripe, (small bulge in yoga pants:1.1), (huge breasts:1.5),\nBREAK, detailed gym setting, (dark), dramatic shadow, vignetting, volumetric lighting, incredibly detailed skin",
+      "parser": "A1111",
+      "mean_normalization": true,
+      "multi_conditioning": true,
+      "use_old_emphasis_implementation": false,
+      "with_SDXL": false,
+      "ascore": 6,
+      "width": 1024,
+      "height": 1024,
+      "crop_w": 0,
+      "crop_h": 0,
+      "target_width": 1024,
+      "target_height": 1024,
+      "text_g": "",
+      "text_l": "",
+      "smZ_steps": 1,
+      "clip": [
+        "128",
+        0
+      ]
+    },
+    "class_type": "smZ CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode++ (Full Body Positive Prompt)"
+    }
+  },
+  "38": {
+    "inputs": {
+      "text": "modern, recent, old, oldest, text, painting, crayon, graphite, abstract, glitch, deformed, mutated, ugly, disfigured, long body, lowres, bad anatomy, bad hands, missing fingers, extra digits, fewer digits, cropped, very displeasing, (worst quality, bad quality:1.2), bad anatomy, sketch, jpeg artifacts, signature, watermark, username, simple background, conjoined, bad ai-generated, shine, shiny, porcelain skin, naked, nude, portrait, headshot, shiny skin, shiny hair",
+      "parser": "A1111",
+      "mean_normalization": true,
+      "multi_conditioning": false,
+      "use_old_emphasis_implementation": false,
+      "with_SDXL": false,
+      "ascore": 6,
+      "width": 1024,
+      "height": 1024,
+      "crop_w": 0,
+      "crop_h": 0,
+      "target_width": 1024,
+      "target_height": 1024,
+      "text_g": "",
+      "text_l": "",
+      "smZ_steps": 1,
+      "clip": [
+        "128",
+        0
+      ]
+    },
+    "class_type": "smZ CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode++ (Full Body Negative Prompt)"
+    }
+  },
+  "47": {
+    "inputs": {
+      "samples": [
+        "34",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "64": {
+    "inputs": {
+      "text": "realistic, photorealistic, photography, person, body, mannequin, human, face, 2d, flat, anime, manga, cartoon, low poly, blocky, pixelated, harsh shadows, overexposed, busy background, complex scene, full body, entire person, character, face, head, hair, eyes, hands, feet, legs, arms, skin, flesh, human features, kneeling, sitting, standing, pose",
+      "parser": "A1111",
+      "mean_normalization": true,
+      "multi_conditioning": false,
+      "use_old_emphasis_implementation": false,
+      "with_SDXL": false,
+      "ascore": 6,
+      "width": 1024,
+      "height": 1024,
+      "crop_w": 0,
+      "crop_h": 0,
+      "target_width": 1024,
+      "target_height": 1024,
+      "text_g": "",
+      "text_l": "",
+      "smZ_steps": 1,
+      "clip": [
+        "128",
+        0
+      ]
+    },
+    "class_type": "smZ CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode++ (Clothing Only Negative Prompt)"
+    }
+  },
+  "65": {
+    "inputs": {
+      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, 3d, BREAK, pink blouse, floating clothing, hollow clothes, empty garment, no body inside, ghost wearing, clothing maintaining shape without wearer, (invisible mannequin effect:1.5), simple background, studio lighting",
+      "parser": "A1111",
+      "mean_normalization": true,
+      "multi_conditioning": true,
+      "use_old_emphasis_implementation": false,
+      "with_SDXL": false,
+      "ascore": 6,
+      "width": 1024,
+      "height": 1024,
+      "crop_w": 0,
+      "crop_h": 0,
+      "target_width": 1024,
+      "target_height": 1024,
+      "text_g": "",
+      "text_l": "",
+      "smZ_steps": 1,
+      "clip": [
+        "128",
+        0
+      ]
+    },
+    "class_type": "smZ CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode++ (Clothing Only Positive Prompt)"
+    }
+  },
+  "66": {
+    "inputs": {
+      "width": 768,
+      "height": 1344,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "67": {
+    "inputs": {
+      "seed": 61451218028854,
+      "steps": 20,
+      "cfg": 5,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "karras",
+      "denoise": 1,
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "65",
+        0
+      ],
+      "negative": [
+        "64",
+        0
+      ],
+      "latent_image": [
+        "66",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "68": {
+    "inputs": {
+      "samples": [
+        "67",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "70": {
+    "inputs": {
+      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, scenery, 3d, rim lighting, BREAK,\n1futa, (a beautiful light pink blouse:1.3), long peasant sleeves with ruffled cuffs, (delicate lace trim around a wide scoop neckline:1.2), small ribbon bow detail, soft flowing fabric, drapes naturally, black yoga pants with vibrant purple side stripe, (small bulge in yoga pants:1.1), (huge breasts:2),\nBREAK\ndetailed gym setting, (dark), dramatic shadow, vignetting, volumetric lighting, incredibly detailed skin",
+      "parser": "A1111",
+      "mean_normalization": true,
+      "multi_conditioning": true,
+      "use_old_emphasis_implementation": false,
+      "with_SDXL": false,
+      "ascore": 6,
+      "width": 1024,
+      "height": 1024,
+      "crop_w": 0,
+      "crop_h": 0,
+      "target_width": 1024,
+      "target_height": 1024,
+      "text_g": "",
+      "text_l": "",
+      "smZ_steps": 1,
+      "clip": [
+        "128",
+        0
+      ]
+    },
+    "class_type": "smZ CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode++ (Apply Clothing to Body Positive Prompt)"
+    }
+  },
+  "71": {
+    "inputs": {
+      "text": "modern, recent, old, oldest, cartoon, anime, graphic, text, painting, crayon, graphite, abstract, glitch, deformed, mutated, ugly, disfigured, long body, lowres, bad anatomy, bad hands, missing fingers, extra digits, fewer digits, cropped, very displeasing, (worst quality, bad quality:1.2), sketch, jpeg artifacts, signature, watermark, username, conjoined, bad ai-generated, shine, shiny, porcelain skin, naked, nude, portrait, headshot, hair",
+      "parser": "A1111",
+      "mean_normalization": true,
+      "multi_conditioning": false,
+      "use_old_emphasis_implementation": false,
+      "with_SDXL": false,
+      "ascore": 6,
+      "width": 1024,
+      "height": 1024,
+      "crop_w": 0,
+      "crop_h": 0,
+      "target_width": 1024,
+      "target_height": 1024,
+      "text_g": "",
+      "text_l": "",
+      "smZ_steps": 1,
+      "clip": [
+        "128",
+        0
+      ]
+    },
+    "class_type": "smZ CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode++ (Apply Clothing to Body Negative Prompt)"
+    }
+  },
+  "82": {
+    "inputs": {
+      "image": "ComfyUI_00055_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Current Body Image (to replace Clothing Item)"
+    }
+  },
+  "95": {
+    "inputs": {
+      "select": 3,
+      "sel_mode": false,
+      "input1": [
+        "9",
+        0
+      ],
+      "input2": [
+        "314",
+        0
+      ],
+      "input3": [
+        "115",
+        0
+      ],
+      "input4": [
+        "188",
+        0
+      ],
+      "input5": [
+        "68",
+        0
+      ]
+    },
+    "class_type": "ImpactSwitch",
+    "_meta": {
+      "title": "Mode Select (Switch)"
+    }
+  },
+  "102": {
+    "inputs": {
+      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, scenery, 3d, BREAK,\nbeautiful face, (dyed hair black with vibrant purple highlights:1.2), cropped bangs,\ncateye, black eyeliner, (detailed beautiful eyes:1.3), gray eyes, long eyelashes, eye light,\nhuge plump bimbo lips, lip gloss, looking at viewer,\nBREAK, dramatic shadow, vignetting, volumetric lighting, incredibly detailed skin",
+      "parser": "A1111",
+      "mean_normalization": true,
+      "multi_conditioning": false,
+      "use_old_emphasis_implementation": false,
+      "with_SDXL": false,
+      "ascore": 6,
+      "width": 1024,
+      "height": 1024,
+      "crop_w": 0,
+      "crop_h": 0,
+      "target_width": 1024,
+      "target_height": 1024,
+      "text_g": "",
+      "text_l": "",
+      "smZ_steps": 1,
+      "clip": [
+        "128",
+        0
+      ]
+    },
+    "class_type": "smZ CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode++ (FaceDETAILER Positive Prompt)"
+    }
+  },
+  "103": {
+    "inputs": {
+      "text": "modern, recent, old, oldest, cartoon, anime, graphic, text, painting, crayon, graphite, abstract, glitch, deformed, mutated, ugly, disfigured, lowres, bad anatomy, very displeasing, (worst quality, bad quality:1.2), bad anatomy, sketch, jpeg artifacts, signature, watermark, username, conjoined, bad ai-generated",
+      "parser": "A1111",
+      "mean_normalization": true,
+      "multi_conditioning": false,
+      "use_old_emphasis_implementation": false,
+      "with_SDXL": false,
+      "ascore": 6,
+      "width": 1024,
+      "height": 1024,
+      "crop_w": 0,
+      "crop_h": 0,
+      "target_width": 1024,
+      "target_height": 1024,
+      "text_g": "",
+      "text_l": "",
+      "smZ_steps": 1,
+      "clip": [
+        "128",
+        0
+      ]
+    },
+    "class_type": "smZ CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode++ (FaceDETAILER Negative Prompt)"
+    }
+  },
+  "115": {
+    "inputs": {
+      "guide_size": 512,
+      "guide_size_for": true,
+      "max_size": 1024,
+      "seed": 250444880675103,
+      "steps": 20,
+      "cfg": 5,
+      "sampler_name": "dpmpp_2m_sde",
+      "scheduler": "karras",
+      "denoise": 0.45000000000000007,
+      "feather": 20,
+      "noise_mask": true,
+      "force_inpaint": true,
+      "wildcard": "",
+      "cycle": 1,
+      "inpaint_model": false,
+      "noise_mask_feather": 50,
+      "tiled_encode": false,
+      "tiled_decode": false,
+      "image": [
+        "47",
+        0
+      ],
+      "segs": [
+        "117",
+        0
+      ],
+      "model": [
+        "124",
+        0
+      ],
+      "clip": [
+        "124",
+        1
+      ],
+      "vae": [
+        "124",
+        2
+      ],
+      "positive": [
+        "102",
+        0
+      ],
+      "negative": [
+        "103",
+        0
+      ]
+    },
+    "class_type": "DetailerForEach",
+    "_meta": {
+      "title": "Detailer (SEGS)"
+    }
+  },
+  "117": {
+    "inputs": {
+      "combined": false,
+      "crop_factor": 3,
+      "bbox_fill": false,
+      "drop_size": 10,
+      "contour_fill": false,
+      "mask": [
+        "261",
+        1
+      ]
+    },
+    "class_type": "MaskToSEGS",
+    "_meta": {
+      "title": "MASK to SEGS"
+    }
+  },
+  "123": {
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "128",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ],
+      "positive": [
+        "37",
+        0
+      ],
+      "negative": [
+        "38",
+        0
+      ]
+    },
+    "class_type": "ToBasicPipe",
+    "_meta": {
+      "title": "ToBasicPipe"
+    }
+  },
+  "124": {
+    "inputs": {
+      "basic_pipe": [
+        "123",
+        0
+      ]
+    },
+    "class_type": "FromBasicPipe",
+    "_meta": {
+      "title": "FromBasicPipe"
+    }
+  },
+  "128": {
+    "inputs": {
+      "stop_at_clip_layer": -2,
+      "clip": [
+        "1",
+        1
+      ]
+    },
+    "class_type": "CLIPSetLastLayer",
+    "_meta": {
+      "title": "CLIP Set Last Layer"
+    }
+  },
+  "141": {
+    "inputs": {
+      "detect_hand": "enable",
+      "detect_body": "enable",
+      "detect_face": "enable",
+      "resolution": 512,
+      "bbox_detector": "yolox_l.onnx",
+      "pose_estimator": "dw-ll_ucoco_384_bs5.torchscript.pt",
+      "scale_stick_for_xinsr_cn": "disable",
+      "image": [
+        "82",
+        0
+      ]
+    },
+    "class_type": "DWPreprocessor",
+    "_meta": {
+      "title": "DWPose Estimator"
+    }
+  },
+  "144": {
+    "inputs": {
+      "control_net_name": "control-lora-openposeXL2-rank256.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "Load ControlNet Model"
+    }
+  },
+  "146": {
+    "inputs": {
+      "strength": 1,
+      "start_percent": 0,
+      "end_percent": 0.4000000000000001,
+      "positive": [
+        "184",
+        3
+      ],
+      "negative": [
+        "184",
+        4
+      ],
+      "control_net": [
+        "144",
+        0
+      ],
+      "image": [
+        "141",
+        0
+      ],
+      "vae": [
+        "184",
+        2
+      ]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": {
+      "title": "Apply ControlNet"
+    }
+  },
+  "153": {
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "128",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ],
+      "positive": [
+        "70",
+        0
+      ],
+      "negative": [
+        "71",
+        0
+      ]
+    },
+    "class_type": "ToBasicPipe",
+    "_meta": {
+      "title": "ToBasicPipe"
+    }
+  },
+  "184": {
+    "inputs": {
+      "basic_pipe": [
+        "153",
+        0
+      ]
+    },
+    "class_type": "FromBasicPipe",
+    "_meta": {
+      "title": "FromBasicPipe"
+    }
+  },
+  "188": {
+    "inputs": {
+      "guide_size": 512,
+      "guide_size_for": true,
+      "max_size": 1024,
+      "seed": 109088123480588,
+      "steps": 20,
+      "cfg": 5,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "karras",
+      "denoise": 1,
+      "feather": 20,
+      "noise_mask": true,
+      "force_inpaint": true,
+      "wildcard": "",
+      "cycle": 1,
+      "inpaint_model": false,
+      "noise_mask_feather": 20,
+      "tiled_encode": false,
+      "tiled_decode": false,
+      "image": [
+        "82",
+        0
+      ],
+      "segs": [
+        "292",
+        0
+      ],
+      "model": [
+        "184",
+        0
+      ],
+      "clip": [
+        "184",
+        1
+      ],
+      "vae": [
+        "184",
+        2
+      ],
+      "positive": [
+        "146",
+        0
+      ],
+      "negative": [
+        "146",
+        1
+      ]
+    },
+    "class_type": "DetailerForEach",
+    "_meta": {
+      "title": "Detailer (SEGS)"
+    }
+  },
+  "189": {
+    "inputs": {
+      "combined": false,
+      "crop_factor": 3,
+      "bbox_fill": false,
+      "drop_size": 10,
+      "contour_fill": false,
+      "mask": [
+        "296",
+        0
+      ]
+    },
+    "class_type": "MaskToSEGS",
+    "_meta": {
+      "title": "MASK to SEGS"
+    }
+  },
+  "261": {
+    "inputs": {
+      "Hair": false,
+      "Glasses": false,
+      "Top-clothes": false,
+      "Bottom-clothes": false,
+      "Torso-skin": false,
+      "Face": true,
+      "Left-arm": false,
+      "Right-arm": false,
+      "Left-leg": false,
+      "Right-leg": false,
+      "Left-foot": false,
+      "Right-foot": false,
+      "mask_blur": 0,
+      "mask_offset": 10,
+      "invert_output": false,
+      "background": "Alpha",
+      "images": [
+        "47",
+        0
+      ]
+    },
+    "class_type": "BodySegment",
+    "_meta": {
+      "title": "Face Only Bodypart Segmentation (RMBG)"
+    }
+  },
+  "279": {
+    "inputs": {
+      "Hat": false,
+      "Hair": false,
+      "Face": false,
+      "Sunglasses": false,
+      "Upper-clothes": true,
+      "Skirt": true,
+      "Dress": false,
+      "Belt": true,
+      "Pants": true,
+      "Left-arm": true,
+      "Right-arm": true,
+      "Left-leg": true,
+      "Right-leg": true,
+      "Bag": false,
+      "Scarf": false,
+      "Left-shoe": false,
+      "Right-shoe": false,
+      "Background": false,
+      "process_res": 512,
+      "mask_blur": 0,
+      "mask_offset": 15,
+      "invert_output": false,
+      "background": "Alpha",
+      "images": [
+        "82",
+        0
+      ]
+    },
+    "class_type": "ClothesSegment",
+    "_meta": {
+      "title": "Clothing Segmentation (RMBG)"
+    }
+  },
+  "292": {
+    "inputs": {
+      "strength": 0.7500000000000001,
+      "start_percent": 0,
+      "end_percent": 0.4000000000000001,
+      "segs": [
+        "189",
+        0
+      ],
+      "control_net": [
+        "293",
+        0
+      ],
+      "control_image": [
+        "300",
+        0
+      ],
+      "vae": [
+        "184",
+        2
+      ]
+    },
+    "class_type": "ImpactControlNetApplyAdvancedSEGS",
+    "_meta": {
+      "title": "ControlNetApply (SEGS)"
+    }
+  },
+  "293": {
+    "inputs": {
+      "control_net_name": "control-lora-depth-rank128.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "Load ControlNet Model"
+    }
+  },
+  "296": {
+    "inputs": {
+      "dilation": 4,
+      "mask": [
+        "297",
+        0
+      ]
+    },
+    "class_type": "ImpactDilateMask",
+    "_meta": {
+      "title": "Dilate Mask"
+    }
+  },
+  "297": {
+    "inputs": {
+      "sensitivity": 1,
+      "mask_blur": 0,
+      "mask_offset": 5,
+      "smooth": 0,
+      "fill_holes": true,
+      "invert_output": false,
+      "mask": [
+        "279",
+        1
+      ]
+    },
+    "class_type": "AILab_MaskEnhancer",
+    "_meta": {
+      "title": "Mask Enhancer (RMBG) 🖼️"
+    }
+  },
+  "300": {
+    "inputs": {
+      "resolution": 512,
+      "image": [
+        "82",
+        0
+      ]
+    },
+    "class_type": "Zoe-DepthMapPreprocessor",
+    "_meta": {
+      "title": "Zoe Depth Map"
+    }
+  },
+  "301": {
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "128",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ],
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "ToBasicPipe",
+    "_meta": {
+      "title": "ToBasicPipe"
+    }
+  },
+  "302": {
+    "inputs": {
+      "basic_pipe": [
+        "301",
+        0
+      ]
+    },
+    "class_type": "FromBasicPipe",
+    "_meta": {
+      "title": "FromBasicPipe"
+    }
+  },
+  "303": {
+    "inputs": {
+      "image": "ComfyUI_00043_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Current Face Image for Detailer"
+    }
+  },
+  "304": {
+    "inputs": {
+      "detect_hand": "disable",
+      "detect_body": "disable",
+      "detect_face": "enable",
+      "resolution": 512,
+      "bbox_detector": "yolox_l.onnx",
+      "pose_estimator": "dw-ll_ucoco_384_bs5.torchscript.pt",
+      "scale_stick_for_xinsr_cn": "disable",
+      "image": [
+        "303",
+        0
+      ]
+    },
+    "class_type": "DWPreprocessor",
+    "_meta": {
+      "title": "DWPose Estimator"
+    }
+  },
+  "305": {
+    "inputs": {
+      "control_net_name": "control-lora-openposeXL2-rank256.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "Load ControlNet Model"
+    }
+  },
+  "306": {
+    "inputs": {
+      "strength": 1.0000000000000002,
+      "start_percent": 0,
+      "end_percent": 0.25000000000000006,
+      "positive": [
+        "302",
+        3
+      ],
+      "negative": [
+        "302",
+        4
+      ],
+      "control_net": [
+        "305",
+        0
+      ],
+      "image": [
+        "304",
+        0
+      ],
+      "vae": [
+        "302",
+        2
+      ]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": {
+      "title": "Apply ControlNet"
+    }
+  },
+  "307": {
+    "inputs": {
+      "control_net_name": "control-lora-depth-rank128.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "Load ControlNet Model"
+    }
+  },
+  "309": {
+    "inputs": {
+      "sensitivity": 1,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "smooth": 0,
+      "fill_holes": true,
+      "invert_output": false,
+      "mask": [
+        "325",
+        1
+      ]
+    },
+    "class_type": "AILab_MaskEnhancer",
+    "_meta": {
+      "title": "Mask Enhancer (RMBG) 🖼️"
+    }
+  },
+  "311": {
+    "inputs": {
+      "combined": false,
+      "crop_factor": 3,
+      "bbox_fill": false,
+      "drop_size": 10,
+      "contour_fill": false,
+      "mask": [
+        "309",
+        0
+      ]
+    },
+    "class_type": "MaskToSEGS",
+    "_meta": {
+      "title": "MASK to SEGS"
+    }
+  },
+  "312": {
+    "inputs": {
+      "strength": 0.5000000000000001,
+      "start_percent": 0,
+      "end_percent": 0.4000000000000001,
+      "segs": [
+        "311",
+        0
+      ],
+      "control_net": [
+        "307",
+        0
+      ],
+      "control_image": [
+        "313",
+        0
+      ],
+      "vae": [
+        "302",
+        2
+      ]
+    },
+    "class_type": "ImpactControlNetApplyAdvancedSEGS",
+    "_meta": {
+      "title": "ControlNetApply (SEGS)"
+    }
+  },
+  "313": {
+    "inputs": {
+      "resolution": 512,
+      "image": [
+        "303",
+        0
+      ]
+    },
+    "class_type": "Zoe-DepthMapPreprocessor",
+    "_meta": {
+      "title": "Zoe Depth Map"
+    }
+  },
+  "314": {
+    "inputs": {
+      "guide_size": 512,
+      "guide_size_for": true,
+      "max_size": 1024,
+      "seed": 1025500175511905,
+      "steps": 20,
+      "cfg": 5,
+      "sampler_name": "euler_ancestral",
+      "scheduler": "karras",
+      "denoise": 1,
+      "feather": 20,
+      "noise_mask": true,
+      "force_inpaint": true,
+      "wildcard": "",
+      "cycle": 1,
+      "inpaint_model": false,
+      "noise_mask_feather": 20,
+      "tiled_encode": false,
+      "tiled_decode": false,
+      "image": [
+        "303",
+        0
+      ],
+      "segs": [
+        "311",
+        0
+      ],
+      "model": [
+        "302",
+        0
+      ],
+      "clip": [
+        "302",
+        1
+      ],
+      "vae": [
+        "302",
+        2
+      ],
+      "positive": [
+        "306",
+        0
+      ],
+      "negative": [
+        "306",
+        1
+      ]
+    },
+    "class_type": "DetailerForEach",
+    "_meta": {
+      "title": "Detailer (SEGS)"
+    }
+  },
+  "325": {
+    "inputs": {
+      "Skin": true,
+      "Nose": true,
+      "Eyeglasses": false,
+      "Left-eye": true,
+      "Right-eye": true,
+      "Left-eyebrow": true,
+      "Right-eyebrow": true,
+      "Left-ear": false,
+      "Right-ear": false,
+      "Mouth": true,
+      "Upper-lip": true,
+      "Lower-lip": true,
+      "Hair": false,
+      "Earring": false,
+      "Neck": false,
+      "process_res": 512,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": false,
+      "background": "Alpha",
+      "images": [
+        "303",
+        0
+      ]
+    },
+    "class_type": "FaceSegment",
+    "_meta": {
+      "title": "Face Segmentation (RMBG)"
+    }
+  },
+  "329": {
+    "inputs": {
+      "images": [
+        "95",
+        0
+      ]
+    },
+    "class_type": "SaveImageWebsocket",
+    "_meta": {
+      "title": "SaveImageWebsocket"
+    }
+  }
+}

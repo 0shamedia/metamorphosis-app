@@ -43,19 +43,6 @@ pub fn get_core_models_list() -> Vec<ModelConfig> {
             is_essential: true,
         },
         ModelConfig {
-            id: "clip_vision_vit_h_14_laion2b".to_string(),
-            name: "CLIP Vision ViT-H-14 Laion2B".to_string(),
-            url: "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors".to_string(),
-            target_subdir: "clip_vision".to_string(),
-            target_filename: "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors".to_string(),
-            downloaded_filename: Some("model.safetensors".to_string()),
-            expected_size_bytes: Some(2_528_373_448),
-            model_type: ModelType::CLIPVision,
-            is_essential: true,
-        },
-
-
-        ModelConfig {
             id: "clipseg_weights_rd64_refined".to_string(),
             name: "CLIPSeg Weights (RD64-Refined)".to_string(),
             url: "https://huggingface.co/CIDAS/clipseg-rd64-refined/resolve/main/pytorch_model.bin".to_string(),

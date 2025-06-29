@@ -7,9 +7,13 @@ import GenerationGallery from '@/features/character-creation/components/Generati
 import AstralMirrorDisplay from '@/features/character-creation/components/AstralMirrorDisplay'; // Import AstralMirrorDisplay
 import StyledToggle from '@/components/ui/StyledToggle';
 import useCharacterStore from '@/store/characterStore';
-import { ImageOption, CharacterAttributes } from '@/types/character'; // Added CharacterAttributes for clarity if needed, though store provides it
-import { initiateImageGeneration, uploadImageToComfyUI } from '@/services/comfyuiService';
-import { saveCharacterImage, generateUUID } from '@/services/imageSaverService'; // Added for finalization
+import { ImageOption, CharacterAttributes } from '@/types/character';
+import { generateFace, generateBodyFromPrompt } from '@/services/workflowOrchestrationService';
+import { get_dynamic_prompt_content } from '@/services/characterStateService';
+import { get_template, build_prompt } from '@/services/promptTemplateService';
+import { GenerationMode } from '@/types/generation';
+import { invoke } from '@tauri-apps/api/core';
+
 
 // Placeholder for particle generation logic (can be moved to a separate component)
 const Particles: React.FC = () => {
@@ -84,26 +88,22 @@ const CharacterCreationPage: React.FC = () => {
     generationProgress,
     error: characterError, // Get error state from store
     setError: setCharacterError, // Action to clear error if needed
-    setFinalizedCharacter // Action for finalization
+    setFinalizedCharacter, // Action for finalization
+    // New state for image lifecycle
+    latestImageBlob,
+    latestImageUrl,
+    setLatestImage,
+    savedFaceImagePath,
+    savedBodyImagePath,
+    setSavedFaceImagePath,
+    setSavedBodyImagePath,
+    lastGenerationMode,
+    tags
   } = useCharacterStore();
 
   const [activePreview, setActivePreview] = useState<'face' | 'body'>('face');
-  const [currentWebsocket, setCurrentWebsocket] = useState<{ close: () => void } | null>(null);
-  const [uploadedFaceDetails, setUploadedFaceDetails] = useState<{ filename: string; subfolder?: string } | null>(null);
   const [isFinalizing, setIsFinalizing] = useState(false); // State for finalization loading
 
-
-  useEffect(() => {
-    // Cleanup WebSocket connection if the component unmounts or step changes significantly
-    // This effect now only runs on mount and unmount
-    return () => {
-      if (currentWebsocket) {
-        console.log("[CharacterCreationPage] Closing WebSocket on component unmount.");
-        currentWebsocket.close();
-        setCurrentWebsocket(null); // Clear the state
-      }
-    };
-  }, []); // Empty dependency array: runs only on mount and unmount
 
   // Diagnostic useEffect to log state changes
   useEffect(() => {
@@ -119,16 +119,23 @@ const CharacterCreationPage: React.FC = () => {
   }, [isGeneratingFace, faceOptions, selectedFace]);
 
   const handleAttributeSubmit = async () => {
-    if (currentWebsocket) currentWebsocket.close(); // Close previous socket if any
-    // setCreationStep('faceSelection'); // Keep on 'attributes' step
-    setSelectedFace(null); // Reset selected face if re-generating
-    // setFaceOptions([]); // Removed to allow accumulation of face options
-    const result = await initiateImageGeneration(attributes, [], 'face');
-    if (result) {
-      setCurrentWebsocket({ close: result.closeSocket });
-    } else {
-      console.error("Face generation initiation failed.");
-      // Error is set in store by initiateImageGeneration
+    setIsGeneratingFace(true);
+    setFaceOptions([]);
+    setSelectedFace(null);
+    setCharacterError(null);
+
+    try {
+      const dynamicContent = await get_dynamic_prompt_content(attributes, tags);
+      const template = await get_template(GenerationMode.FaceFromPrompt);
+      const positivePrompt = build_prompt(template, dynamicContent);
+      const negativePrompt = "bad quality, worst quality, deformed, ugly, disfigured";
+
+      await generateFace(positivePrompt, negativePrompt);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Error in handleAttributeSubmit:", errorMessage);
+      setCharacterError(errorMessage);
+      setIsGeneratingFace(false);
     }
   };
 
@@ -138,87 +145,61 @@ const CharacterCreationPage: React.FC = () => {
   };
   
   const confirmFaceSelectionAndGenerateBody = async () => {
-    if (!selectedFace || !selectedFace.url) return;
-    
-    if (currentWebsocket) currentWebsocket.close(); // Close previous socket
+    if (!selectedFace) {
+      setCharacterError("A face must be selected before generating a body.");
+      return;
+    }
 
-    setIsGeneratingFullBody(true); // Set loading state for the whole process
-
-    // Step 1: Convert selectedFace.url to a File object
-    let faceFile: File | null = null;
+    // Save the selected face first
     try {
-      const response = await fetch(selectedFace.url); // Fetch the image data from its URL
-      if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
+      const reader = new FileReader();
+      const response = await fetch(selectedFace.url);
       const blob = await response.blob();
-      faceFile = new File([blob], "selected_face.png", { type: blob.type || 'image/png' });
-    } catch (error) {
-      console.error("Error fetching selected face image to create a file:", error);
-      setCharacterError(`Error processing face image: ${error instanceof Error ? error.message : String(error)}`);
-      setIsGeneratingFullBody(false); // Reset loading state
-      return;
-    }
+      
+      reader.readAsDataURL(blob);
+      reader.onloadend = async () => {
+        try {
+          const base64data = reader.result as string;
+          const base64Image = base64data.split(',')[1];
 
-    // Step 2: Upload the File to ComfyUI
-    // Directly use the result of uploadImageToComfyUI for the initial generation
-    // and also set it to state for regeneration.
-    if (faceFile) {
-      const uploadResult = await uploadImageToComfyUI(faceFile, true, "character_faces_input"); // Use a distinct subfolder, overwrite true
-      if (uploadResult && uploadResult.filename) {
-        setUploadedFaceDetails({ filename: uploadResult.filename, subfolder: uploadResult.subfolder }); // Store details in state for regeneration
+          const permanentPath = await invoke<string>('save_image_to_disk', {
+            imageDataBase64: base64Image,
+            filenamePrefix: 'face',
+          });
 
-        setCreationStep('bodySelection');
-        const result = await initiateImageGeneration(
-          attributes,
-          [],
-          'fullbody',
-          uploadResult.filename, // Use directly from uploadResult here
-          uploadResult.subfolder
-        );
-        if (result) {
-          setCurrentWebsocket({ close: result.closeSocket });
-        } else {
-          console.error("Full body generation initiation failed.");
-          // Error and isGeneratingFullBody=false are handled by initiateImageGeneration
+          setSavedFaceImagePath(permanentPath);
+          setCreationStep('bodySelection');
+          
+          // Now generate the body
+          setIsGeneratingFullBody(true);
+          setFullBodyOptions([]);
+          setSelectedFullBody(null);
+          setCharacterError(null);
+
+          const dynamicContent = await get_dynamic_prompt_content(attributes, tags);
+          const template = await get_template(GenerationMode.BodyFromPrompt);
+          const positivePrompt = build_prompt(template, dynamicContent);
+          const negativePrompt = "bad quality, worst quality, deformed, ugly, disfigured, missing limbs";
+
+          await generateBodyFromPrompt(permanentPath, positivePrompt, negativePrompt);
+
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error("Error during image save or body generation:", errorMessage);
+          setCharacterError(`Failed to save face or generate body: ${errorMessage}`);
+          setIsGeneratingFullBody(false);
         }
-      } else {
-        console.error("Failed to upload face image to ComfyUI.");
-        // Error is already set in the store by uploadImageToComfyUI
-        setIsGeneratingFullBody(false); // Reset loading state
-        return;
-      }
-    } else {
-      // This case should ideally not be reached if the fetch was successful
-      setCharacterError("Could not create face image file for upload.");
-      setIsGeneratingFullBody(false); // Reset loading state
-      return;
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Error fetching blob for saving:", errorMessage);
+      setCharacterError(`Failed to fetch image for saving: ${errorMessage}`);
     }
-    // Moved initiateImageGeneration call inside the successful upload block
-    // to ensure uploadResult is in scope.
   };
 
   const handleRegenerateFullBody = async () => {
-    if (!uploadedFaceDetails?.filename) {
-      setCharacterError("No face image details available to regenerate full body. Please select a face first.");
-      console.error("Attempted to regenerate full body without uploadedFaceDetails.");
-      return;
-    }
-    if (currentWebsocket) currentWebsocket.close(); // Close previous socket
-
-    // No need to re-upload, use stored details
-    // The check at the beginning of the function ensures uploadedFaceDetails is not null here.
-    const result = await initiateImageGeneration(
-      attributes,
-      [],
-      'fullbody',
-      uploadedFaceDetails!.filename, // Non-null assertion as it's checked above
-      uploadedFaceDetails!.subfolder // Non-null assertion
-    );
-    if (result) {
-      setCurrentWebsocket({ close: result.closeSocket });
-    } else {
-      console.error("Full body regeneration initiation failed.");
-      // Error and isGeneratingFullBody=false are handled by initiateImageGeneration
-    }
+    console.log("TODO: Implement handleRegenerateFullBody");
+    setCharacterError("Full body regeneration is not yet implemented with the new architecture.");
   };
 
   const handleBodySelect = (image: ImageOption) => {
@@ -228,50 +209,34 @@ const CharacterCreationPage: React.FC = () => {
   };
 
   const handleFinalizeCharacter = async () => {
-    if (!selectedFace || !selectedFace.url || typeof selectedFace.seed === 'undefined' ||
-        !selectedFullBody || !selectedFullBody.url || typeof selectedFullBody.seed === 'undefined') {
-      setCharacterError("Both face and full body images (with their seeds) must be selected to finalize.");
+    if (!savedFaceImagePath || !savedBodyImagePath || !selectedFace || !selectedFullBody || typeof selectedFace.seed === 'undefined' || typeof selectedFullBody.seed === 'undefined') {
+      setCharacterError("Both a face and body image must be saved, and selected, with seeds, to finalize the character.");
       return;
     }
 
     setIsFinalizing(true);
-    setCharacterError(null); // Clear previous errors
+    setCharacterError(null);
 
     try {
-      const newCharacterId = generateUUID();
+      const characterId = await invoke<string>('generate_uuid');
 
-      // Save face image
-      const savedFace = await saveCharacterImage({
-        characterId: newCharacterId,
-        imageOption: selectedFace,
-        imageType: 'face',
-      });
-
-      // Save full body image
-      const savedBody = await saveCharacterImage({
-        characterId: newCharacterId,
-        imageOption: selectedFullBody,
-        imageType: 'body',
-      });
-
-      // Update character store
       setFinalizedCharacter({
-        characterId: newCharacterId,
-        attributes: attributes, // Current attributes from store
-        savedFaceImagePath: savedFace.relative,
-        savedFullBodyImagePath: savedBody.relative,
+        characterId: characterId,
+        attributes: attributes,
+        savedFaceImagePath: savedFaceImagePath,
+        savedBodyImagePath: savedBodyImagePath,
         faceSeed: selectedFace.seed,
         bodySeed: selectedFullBody.seed,
       });
-      
-      console.log("Character finalized and saved:", {
-        characterId: newCharacterId,
-        attributes,
-        facePath: savedFace.relative,
-        bodyPath: savedBody.relative
-      });
 
-      // router.push('/game'); // Navigate to the next scene - Temporarily commented out for testing
+      console.log("Character finalized and saved:", {
+        characterId: characterId,
+        attributes,
+        facePath: savedFaceImagePath,
+        bodyPath: savedBodyImagePath
+      });
+      
+      // router.push('/game'); // Navigate to the next scene
       console.log("[CharacterCreationPage] Navigation to /game commented out for testing finalization state.");
 
     } catch (error) {
@@ -294,10 +259,6 @@ const CharacterCreationPage: React.FC = () => {
         setFaceOptions([]);
         setSelectedFace(null);
         setIsGeneratingFace(false);
-        if (currentWebsocket) {
-          currentWebsocket.close();
-          setCurrentWebsocket(null);
-        }
       } else {
         router.push('/title');
       }
@@ -305,6 +266,49 @@ const CharacterCreationPage: React.FC = () => {
       setCreationStep('bodySelection'); // Go back to body selection from finalized
     } else { // Default for safety, or if other steps are added
       router.push('/title');
+    }
+  };
+
+  const handleSaveImage = async () => {
+    if (!latestImageBlob) {
+      setCharacterError("No image blob available to save.");
+      return;
+    }
+
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(latestImageBlob);
+      reader.onloadend = async () => {
+        try {
+          const base64data = reader.result as string;
+          const base64Image = base64data.split(',')[1];
+
+          const prefix = lastGenerationMode === GenerationMode.FaceFromPrompt ? 'face' : 'body';
+
+          const permanentPath = await invoke<string>('save_image_to_disk', {
+            imageDataBase64: base64Image,
+            filenamePrefix: prefix,
+          });
+
+          if (lastGenerationMode === GenerationMode.FaceFromPrompt) {
+            setSavedFaceImagePath(permanentPath);
+          } else {
+            setSavedBodyImagePath(permanentPath);
+          }
+
+          console.log(`Image saved to permanent path and state updated: ${permanentPath}`);
+          alert(`Image saved to: ${permanentPath}`);
+          setLatestImage(null, null);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error("Error during image save operation:", errorMessage);
+          setCharacterError(`Failed to save image: ${errorMessage}`);
+        }
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Error preparing to save image:", errorMessage);
+      setCharacterError(`Failed to prepare image for saving: ${errorMessage}`);
     }
   };
   
@@ -418,9 +422,10 @@ const CharacterCreationPage: React.FC = () => {
                  <AstralMirrorDisplay
                    isGenerating={isGeneratingFace}
                    progress={generationProgress}
-                   previewImageUrl={selectedFace?.url || null}
+                   previewImageUrl={selectedFace?.url || (faceOptions.length > 0 ? faceOptions[0].url : null)}
                    currentStepName="Attributes" // This will show "Generating Face..." internally if isGeneratingFace is true
                  />
+
                  <button
                      onClick={handleAttributeSubmit}
                      disabled={isGeneratingFace}
@@ -446,15 +451,15 @@ const CharacterCreationPage: React.FC = () => {
                  {selectedFace && !isGeneratingFace && (
                     <button
                        onClick={confirmFaceSelectionAndGenerateBody}
-                       disabled={isGeneratingFullBody}
+                       disabled={isGeneratingFullBody || !selectedFace}
                        className={`mt-8 nav-button primary py-3 px-8 rounded-lg text-white text-base font-semibold transition-all duration-200 ease-in-out hover:translate-y-[-2px]
-                                   ${isGeneratingFullBody
+                                   ${isGeneratingFullBody || !selectedFace
                                      ? 'bg-gray-600/30 border border-gray-500/50 text-gray-400/70 cursor-not-allowed opacity-50'
                                      : 'bg-gradient-to-r from-teal-500 to-green-500 hover:shadow-green-glow border-none'}`}
                      >
                        {isGeneratingFullBody ? "Preparing Body..." : "Confirm Face & Generate Body"}
                      </button>
-                 )}
+                  )}
              </div>
            </div>
           )}

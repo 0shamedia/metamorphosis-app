@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "node scripts/start-dev-server.js",
+    "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },
   "app": {
@@ -71,6 +71,7 @@
       "icons/icon.ico"
     ],
     "resources": [
+      "../resources/workflows/Metamorphosis Workflow.json",
       "../resources/workflows/face_workflow_template.json",
       "../resources/workflows/fullbody_workflow_template.json",
       "scripts/script_check_onnx.py",

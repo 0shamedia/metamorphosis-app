@@ -4,7 +4,6 @@ pub mod event_utils;
 pub mod verification;
 pub mod orchestration;
 pub mod types;
-pub mod model_management;
 pub mod model_config;
 pub mod model_events;
 pub mod model_utils;

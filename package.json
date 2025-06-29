@@ -10,7 +10,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.5.0",
+    "@tauri-apps/api": "^2.6.0",
     "@tauri-apps/plugin-fs": "^2.2.1",
     "@tauri-apps/plugin-http": "^2.4.3",
     "next": "15.3.1",
@@ -30,7 +30,7 @@
     "eslint": "^9",
     "eslint-config-next": "15.3.1",
     "tailwindcss": "^4",
-    "typescript": "^5",
-    "tree-kill": "^1.2.2"
+    "tree-kill": "^1.2.2",
+    "typescript": "^5"
   }
 }

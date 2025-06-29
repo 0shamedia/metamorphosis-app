@@ -47,4 +47,4 @@ target/
 
 # Ignore Miniconda environment
 miniconda3/
-miniconda_installed.marker
+.miniconda_installed.marker

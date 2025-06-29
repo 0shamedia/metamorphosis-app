@@ -12,7 +12,6 @@
     { "identifier": "fs:scope", "allow": ["$RESOURCE/**"] },
     { "identifier": "shell:allow-execute", "allow": ["**"] },
     { "identifier": "shell:allow-spawn", "allow": ["comfyui"] },
-    { "identifier": "log:default" },
     { "identifier": "http:allow-fetch", "allow": ["https://*"] },
     { "identifier": "http:allow-fetch-send", "allow": ["http://127.0.0.1:8188/**"] }
   ]

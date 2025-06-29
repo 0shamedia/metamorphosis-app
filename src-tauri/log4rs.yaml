@@ -1,0 +1,26 @@
+# log4rs.yaml
+# Controls the logging configuration for the application.
+refresh_rate: 30 seconds
+
+# Appenders define where log messages are sent.
+appenders:
+  # An appender for console output
+  console:
+    kind: console
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S)} [{l}] - {m}{n}"
+
+  # An appender that writes to a log file
+  file_log:
+    kind: file
+    path: "logs/app.log" # This path is relative to the app's data directory
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S)} [{l}] {M} - {m}{n}"
+    append: true
+
+# Root logger configuration
+root:
+  level: info
+  appenders:
+    - file_log
+    - console

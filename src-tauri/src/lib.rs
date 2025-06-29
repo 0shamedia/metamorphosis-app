@@ -1,55 +1,92 @@
-use tauri_plugin_log::{Target, TargetKind};
 use std::env;
-use tauri::{Manager, Url}; // Import Url
+use tauri::{App, Manager, Url}; // Import App, Manager, Url
 use std::time::Duration;
+use log4rs::config;
+use log4rs::Handle;
 use std::fs; // Import the fs module for file system operations
+use std::sync::{Arc, Mutex};
 
-mod comfyui_sidecar;       // This file re-exports from sidecar_manager
 mod gpu_detection;
-mod dev_server_manager;    // New module for dev server management
-// mod dependency_management; // Deprecated: Logic moved to setup_manager::dependency_manager
 mod setup;                 // This file re-exports from setup_manager
 pub mod sidecar_manager;   // Declare the new top-level module
 pub mod setup_manager;     // Declare the new top-level module
+pub mod character;
 pub mod process_manager;   // Declare the new process manager module
 
-// Command to get workflow templates
-#[tauri::command]
-fn get_workflow_template(workflow_type: String) -> Result<String, String> {
-    match workflow_type.as_str() {
-        "face" => Ok(include_str!("../../resources/workflows/face_workflow_template.json").to_string()),
-        "fullbody" => Ok(include_str!("../../resources/workflows/fullbody_workflow_template.json").to_string()),
-        "fullbody_detailer" => Ok(include_str!("../../resources/workflows/fullbody_workflow_facedetailer.json").to_string()),
-        _ => Err(format!("Invalid workflow type requested: {}", workflow_type)),
+// Define a state to track the shutdown process
+pub struct ShutdownState(pub Arc<Mutex<bool>>);
+pub struct LoggingHandle(pub Handle);
+
+fn init_logging(app: &mut App) -> Result<Handle, Box<dyn std::error::Error>> {
+    let log_config_path = app.path().app_config_dir()?.join("log4rs.yaml");
+
+    if !log_config_path.exists() {
+        // If the config doesn't exist, create a default one.
+        // This is useful for initial setup or if the config gets deleted.
+        let logs_path = app.path().app_data_dir()?.join("logs");
+        fs::create_dir_all(&logs_path)?;
+        let log_file_path = logs_path.join("app.log");
+
+        let default_config = format!(
+            r#"
+refresh_rate: 30 seconds
+appenders:
+  stdout:
+    kind: console
+    encoder:
+      pattern: "{{d(%Y-%m-%d %H:%M:%S)}} [{{l}}] {{m}}{{n}}"
+  file:
+    kind: file
+    path: "{}"
+    encoder:
+      pattern: "{{d(%Y-%m-%d %H:%M:%S)}} [{{l}}] [{{T}}] {{M}} - {{m}}{{n}}"
+    append: true
+root:
+  level: info
+  appenders:
+    - stdout
+    - file
+"#,
+            log_file_path.to_str().unwrap().replace('\\', "/")
+        );
+        fs::write(&log_config_path, default_config)?;
     }
+
+    let config = config::load_config_file(&log_config_path, Default::default())?;
+    let handle = log4rs::init_config(config)?;
+    Ok(handle)
+}
+
+// Command to get the unified workflow template
+#[tauri::command]
+fn get_unified_workflow() -> Result<String, String> {
+    Ok(include_str!("../../resources/workflows/Metamorphosis Workflow.json").to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  log::set_max_level(log::LevelFilter::Trace); // Set max log level to capture all messages
   let app_start_time = std::time::Instant::now();
   
-  log::info!("======= METAMORPHOSIS APPLICATION STARTUP =======");
-  log::info!("Runtime Info: OS: {}, Arch: {}", std::env::consts::OS, std::env::consts::ARCH);
-  log::info!("Start Time: {:?}", app_start_time);
-  log::info!("===============================================");
-  
   tauri::Builder::default()
-    .plugin(
-        tauri_plugin_log::Builder::default()
-            .targets([
-                Target::new(TargetKind::Stdout),
-                Target::new(TargetKind::LogDir { file_name: Some("app.log".into()) }), // Specify log file name
-                Target::new(TargetKind::Webview), // Add Webview target for browser console logs
-            ])
-            .build()
-    ) // Initialize log plugin first
     .plugin(tauri_plugin_fs::init()) // Initialize the FS plugin
     .plugin(tauri_plugin_shell::init()) // Initialize the Shell plugin
     .plugin(tauri_plugin_opener::init()) // Initialize the Opener plugin
     .manage(process_manager::ProcessManager::new()) // Add the process manager to the state
+    .manage(ShutdownState(Arc::new(Mutex::new(false)))) // Add shutdown state
     .setup(move |app| {
-      // Logging should be configured via the plugin initialization above
+        match init_logging(app) {
+            Ok(handle) => {
+                app.manage(LoggingHandle(handle));
+            }
+            Err(e) => {
+                eprintln!("Failed to initialize logging: {}", e);
+                // Exit or handle error appropriately
+            }
+        }
+      log::info!("======= METAMORPHOSIS APPLICATION STARTUP =======");
+      log::info!("Runtime Info: OS: {}, Arch: {}", std::env::consts::OS, std::env::consts::ARCH);
+      log::info!("Start Time: {:?}", app_start_time);
+      log::info!("===============================================");
       log::info!("[STARTUP] App setup started - elapsed: {:?}", app_start_time.elapsed());
       
       let app_handle_clone = app.handle().clone(); // Clone app_handle for async task
@@ -164,32 +201,50 @@ pub fn run() {
       // Register the new backend readiness command
       sidecar_manager::orchestration::ensure_backend_ready,
       sidecar_manager::orchestration::ensure_comfyui_running_and_healthy,
-      // Register the new workflow template command
-      get_workflow_template
+      // Register the new unified workflow command
+      get_unified_workflow,
+      character::character_generator::generate_character,
+      character::character_generator::save_image_to_disk
     ])
     .on_window_event(move |window, event| {
         match event {
             tauri::WindowEvent::Destroyed => {
                 if window.label() == "main" {
-                    log::info!("[LIFECYCLE] Main window destroyed.");
-                    log::logger().flush();
+                    log::info!("[LIFECYCLE] Main window destroyed. Logger will shut down with app state.");
+                    // The logger handle in the app's state will be dropped when the app shuts down,
+                    // which will gracefully flush and close the logger. No explicit call needed.
                 }
             }
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 if window.label() == "main" {
-                    log::info!("[LIFECYCLE] Main window close requested. Stopping all managed processes before exit.");
+                    let shutdown_state = window.state::<ShutdownState>();
+                    let mut is_shutting_down = shutdown_state.0.lock().unwrap();
+
+                    if *is_shutting_down {
+                        // Shutdown is already in progress, allow the window to close.
+                        log::info!("[LIFECYCLE] Shutdown already initiated, allowing window to close now.");
+                        return; // This allows the default close to proceed, breaking the loop.
+                    }
+
+                    // First time close is requested, start the shutdown process.
+                    *is_shutting_down = true;
+                    log::info!("[LIFECYCLE] Main window close requested. Starting graceful shutdown.");
                     api.prevent_close();
 
                     let app_handle = window.app_handle().clone();
+                    let window_clone = window.clone();
 
                     tauri::async_runtime::spawn(async move {
                         {
                             let process_manager = app_handle.state::<process_manager::ProcessManager>();
-                            process_manager.shutdown_all_processes().await;
+                            process_manager.shutdown_all_processes(&app_handle).await;
                         }
-                        log::logger().flush();
-                        log::info!("[LIFECYCLE] All managed processes stopped. Exiting application.");
-                        app_handle.exit(0);
+                        log::info!("[LIFECYCLE] All managed processes stopped. Requesting final window close.");
+                        
+                        // This will re-trigger CloseRequested, but the flag will be set, so it will fall through.
+                        if let Err(e) = window_clone.close() {
+                            log::error!("[LIFECYCLE] Failed to close window after cleanup: {}", e);
+                        }
                     });
                 }
             }
@@ -198,16 +253,10 @@ pub fn run() {
     })
     .build(tauri::generate_context!())
     .expect("error while building tauri application")
-    .run(move |app_handle, event| match event {
-        tauri::RunEvent::ExitRequested { .. } => {
-            // This event is triggered when `app_handle.exit(0)` is called.
-            // The actual shutdown logic, including stopping processes, is now handled
-            // in the `on_window_event` handler for `WindowEvent::CloseRequested`.
-            // We leave this empty and DO NOT prevent exit, allowing the application to terminate.
-            log::info!("[LIFECYCLE] Application exit sequence initiated.");
-        }
+    .run(move |_app_handle, event| match event {
         tauri::RunEvent::Exit => {
-             log::info!("[LIFECYCLE] Application exiting - total runtime: {:?}", app_start_time.elapsed());
+            log::info!("[LIFECYCLE] Application exiting - total runtime: {:?}", app_start_time.elapsed());
+            // Logger is handled by the managed state's Drop implementation.
         }
         tauri::RunEvent::Ready => {
             log::info!("[LIFECYCLE] Application ready - startup time: {:?}", app_start_time.elapsed());
@@ -215,5 +264,4 @@ pub fn run() {
         _ => {}
     });
   
-  log::info!("Total initialization time: {:?}", app_start_time.elapsed());
 }
