@@ -4,11 +4,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use super::character_creation_types::{CharacterGenerationState, GenerationMode};
 use tauri::AppHandle;
-use tauri::path::BaseDirectory;
 use tauri::Manager;
-use base64::{Engine as _, engine::general_purpose};
 use uuid::Uuid;
-use std::time::{SystemTime, UNIX_EPOCH};
+use base64::{Engine as _, engine::general_purpose};
+
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GenerationResponse {
@@ -16,20 +15,12 @@ pub struct GenerationResponse {
     client_id: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ImageSaveResult {
-    id: String,
-    url: String,
-    seed: i64,
-    alt: String,
-}
 
 #[tauri::command]
-pub async fn generate_character(app: AppHandle, state: CharacterGenerationState) -> Result<GenerationResponse, String> {
-    let resource_path = app.path().resolve("../resources/workflows/Metamorphosis Workflow.json", BaseDirectory::Resource).expect("failed to resolve resource");
-
-    let workflow_str = fs::read_to_string(&resource_path).map_err(|e| e.to_string())?;
-    let mut workflow: Value = serde_json::from_str(&workflow_str).map_err(|e| e.to_string())?;
+pub async fn generate_character(
+    state: CharacterGenerationState,
+) -> Result<GenerationResponse, String> {
+    let mut workflow: Value = serde_json::from_str(&state.workflow_json).map_err(|e| e.to_string())?;
 
     update_workflow_json(&mut workflow, &state)?;
 
@@ -127,39 +118,65 @@ fn update_node_input<T: Into<Value>>(workflow: &mut Value, node_id: &str, input_
 }
 
 #[tauri::command]
-pub fn save_image_to_disk(
-    app: AppHandle,
-    base64_data: String,
-    image_type: String,
-    seed: i64,
-    character_id: String,
-) -> Result<ImageSaveResult, String> {
-    let storage_path = app.path().app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("Metamorphosis/character_renders/");
+pub fn get_asset_url(app: AppHandle, filename: String, subfolder: String) -> Result<String, String> {
+    // Use the same path resolution logic as process_handler.rs
+    let comfyui_dir = if cfg!(debug_assertions) {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .ok_or("Failed to get parent of CARGO_MANIFEST_DIR")?
+            .join("target")
+            .join("debug")
+            .join("vendor")
+            .join("comfyui")
+    } else {
+        let exe_path = std::env::current_exe()
+            .map_err(|e| format!("Failed to get current executable path: {}", e))?;
+        let exe_dir = exe_path.parent()
+            .ok_or_else(|| format!("Failed to get parent directory of executable: {}", exe_path.display()))?;
+        let target_dir = exe_dir.parent()
+            .ok_or_else(|| format!("Failed to get target directory from executable path: {}", exe_dir.display()))?;
+        target_dir.join("vendor").join("comfyui")
+    };
 
-    fs::create_dir_all(&storage_path)
-        .map_err(|e| format!("Failed to create character_renders directory: {}", e))?;
+    // Build the path to the generated image
+    let image_path = comfyui_dir
+        .join("output")
+        .join(subfolder)
+        .join(&filename);
 
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    let filename = format!("{}_{}_{}_{}.png", character_id, image_type, seed, timestamp);
-    let full_path = storage_path.join(&filename);
+    // Verify the image file exists
+    if !image_path.exists() {
+        return Err(format!("Image not found at path: {}", image_path.display()));
+    }
 
-    let image_bytes = general_purpose::STANDARD
-        .decode(&base64_data)
-        .map_err(|e| format!("Failed to decode base64 image data: {}", e))?;
-
-    fs::write(&full_path, &image_bytes)
-        .map_err(|e| format!("Failed to write image to disk: {}", e))?;
-
-    let url = tauri::Url::from_file_path(&full_path).unwrap().to_string();
-
-    Ok(ImageSaveResult {
-        id: Uuid::new_v4().to_string(),
-        url,
-        seed,
-        alt: format!("Generated {} image with seed {}", image_type, seed),
-    })
+    // For Tauri v2, we need to return a proper file:// URL
+    // that convertFileSrc can handle correctly
+    
+    // Get the absolute path
+    let absolute_path = if image_path.is_absolute() {
+        image_path.clone()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| format!("Failed to get current directory: {}", e))?
+            .join(&image_path)
+    };
+    
+    // Convert to string and normalize slashes
+    let path_str = absolute_path.to_string_lossy().to_string();
+    
+    // Create a proper file:// URL
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: file:///C:/path/to/file (three slashes)
+        let normalized = path_str.replace('\\', "/");
+        Ok(format!("file:///{}", normalized))
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Unix: file:///path/to/file
+        Ok(format!("file://{}", path_str))
+    }
 }
 
 
@@ -191,3 +208,65 @@ pub fn prepare_image_for_edit(app: AppHandle, permanent_path: String) -> Result<
     // 4. Return the filename of the temporary copy
     Ok(temp_filename)
 }
+
+#[tauri::command]
+pub fn get_image_as_data_url(app: AppHandle, filename: String, subfolder: String) -> Result<String, String> {
+    // Use the same path resolution logic as get_asset_url
+    let comfyui_dir = if cfg!(debug_assertions) {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .ok_or("Failed to get parent of CARGO_MANIFEST_DIR")?
+            .join("target")
+            .join("debug")
+            .join("vendor")
+            .join("comfyui")
+    } else {
+        let exe_path = std::env::current_exe()
+            .map_err(|e| format!("Failed to get current executable path: {}", e))?;
+        let exe_dir = exe_path.parent()
+            .ok_or_else(|| format!("Failed to get parent directory of executable: {}", exe_path.display()))?;
+        let target_dir = exe_dir.parent()
+            .ok_or_else(|| format!("Failed to get target directory from executable path: {}", exe_dir.display()))?;
+        target_dir.join("vendor").join("comfyui")
+    };
+
+    // Build the path to the generated image
+    let image_path = comfyui_dir
+        .join("output")
+        .join(subfolder)
+        .join(&filename);
+
+    // Verify the image file exists
+    if !image_path.exists() {
+        return Err(format!("Image not found at path: {}", image_path.display()));
+    }
+
+
+    // Read the image file
+    let image_data = fs::read(&image_path)
+        .map_err(|e| format!("Failed to read image file: {}", e))?;
+
+    // Determine MIME type based on file extension
+    let mime_type = match image_path.extension().and_then(|s| s.to_str()) {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        _ => "image/png", // Default to PNG
+    };
+
+    // Convert to base64
+    let base64_data = general_purpose::STANDARD.encode(&image_data);
+    
+    // Return as data URL
+    Ok(format!("data:{};base64,{}", mime_type, base64_data))
+}
+    
+#[tauri::command]
+pub fn get_unified_workflow() -> Result<String, String> {
+        Ok(include_str!("../../../resources/workflows/Metamorphosis Workflow.json").to_string())
+    }
+        
+        #[tauri::command]
+        pub fn generate_uuid() -> String {
+            Uuid::new_v4().to_string()
+        }

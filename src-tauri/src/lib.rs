@@ -57,12 +57,6 @@ root:
     Ok(handle)
 }
 
-// Command to get the unified workflow template
-#[tauri::command]
-fn get_unified_workflow() -> Result<String, String> {
-    Ok(include_str!("../../resources/workflows/Metamorphosis Workflow.json").to_string())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let app_start_time = std::time::Instant::now();
@@ -201,10 +195,12 @@ pub fn run() {
       // Register the new backend readiness command
       sidecar_manager::orchestration::ensure_backend_ready,
       sidecar_manager::orchestration::ensure_comfyui_running_and_healthy,
-      // Register the new unified workflow command
-      get_unified_workflow,
       character::character_generator::generate_character,
-      character::character_generator::save_image_to_disk
+      character::character_generator::get_asset_url,
+      character::character_generator::get_image_as_data_url,
+      character::character_generator::generate_uuid,
+      character::character_generator::prepare_image_for_edit,
+      character::character_generator::get_unified_workflow
     ])
     .on_window_event(move |window, event| {
         match event {

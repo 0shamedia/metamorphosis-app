@@ -13,6 +13,7 @@ pub enum GenerationMode {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterGenerationState {
+    pub workflow_json: String,
     pub generation_mode: GenerationMode,
     pub positive_prompt: String,
     pub negative_prompt: String,

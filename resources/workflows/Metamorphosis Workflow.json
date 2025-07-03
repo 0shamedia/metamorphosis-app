@@ -10,7 +10,7 @@
   },
   "4": {
     "inputs": {
-      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, 3d, rim lighting, portrait, headshot, close-up, BREAK, \nclothed, adult, 1futa, chubby face,\n(dyed hair black with vibrant purple highlights:1.3), cropped bangs,\ncateye, black eyeliner, detailed beautiful eyes, grey eyes, detailed irises, pupils, long eyelashes,\nhuge plump bimbo lips, lip gloss,\nBREAK, simple gradient background, vignetting, volumetric lighting, incredibly detailed skin",
+      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, 3d, rim lighting, portrait, headshot, close-up, adult, BREAK, __DYNAMIC_PROMPT__, BREAK, detailed beautiful eyes, detailed irises, pupils,simple gradient background, vignetting, volumetric lighting, incredibly detailed skin,",
       "parser": "A1111",
       "mean_normalization": true,
       "multi_conditioning": true,
@@ -66,7 +66,7 @@
   },
   "8": {
     "inputs": {
-      "seed": 31092314071745,
+      "seed": 179618355516006,
       "steps": 20,
       "cfg": 5,
       "sampler_name": "euler_ancestral",
@@ -123,7 +123,7 @@
   },
   "34": {
     "inputs": {
-      "seed": 285322571540320,
+      "seed": 570670478569188,
       "steps": 20,
       "cfg": 5,
       "sampler_name": "euler_ancestral",
@@ -164,7 +164,7 @@
   },
   "37": {
     "inputs": {
-      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, scenery, 3d, rim lighting, BREAK,\nadult, 1futa, front view, chubby body,\nbeautiful face, (dyed hair black with vibrant purple highlights:1.2), cropped bangs,\ncateye, black eyeliner, detailed beautiful eyes, gray eyes, long eyelashes,\nhuge plump bimbo lips, lip gloss, looking at viewer,\npurple t-shirt, black yoga pants with vibrant purple side stripe, (small bulge in yoga pants:1.1), (huge breasts:1.5),\nBREAK, detailed gym setting, (dark), dramatic shadow, vignetting, volumetric lighting, incredibly detailed skin",
+      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, scenery, 3d, rim lighting, adult, BREAK, __DYNAMIC_PROMPT__, BREAK, detailed beautiful eyes, dramatic shadow, vignetting, volumetric lighting, incredibly detailed skin,",
       "parser": "A1111",
       "mean_normalization": true,
       "multi_conditioning": true,
@@ -303,7 +303,7 @@
   },
   "67": {
     "inputs": {
-      "seed": 61451218028854,
+      "seed": 950725132327332,
       "steps": 20,
       "cfg": 5,
       "sampler_name": "euler_ancestral",
@@ -349,7 +349,7 @@
   },
   "70": {
     "inputs": {
-      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, scenery, 3d, rim lighting, BREAK,\n1futa, (a beautiful light pink blouse:1.3), long peasant sleeves with ruffled cuffs, (delicate lace trim around a wide scoop neckline:1.2), small ribbon bow detail, soft flowing fabric, drapes naturally, black yoga pants with vibrant purple side stripe, (small bulge in yoga pants:1.1), (huge breasts:2),\nBREAK\ndetailed gym setting, (dark), dramatic shadow, vignetting, volumetric lighting, incredibly detailed skin",
+      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, scenery, 3d, rim lighting, BREAK, __DYNAMIC_PROMPT__, BREAK, dramatic shadow, vignetting, volumetric lighting, incredibly detailed skin,",
       "parser": "A1111",
       "mean_normalization": true,
       "multi_conditioning": true,
@@ -414,7 +414,7 @@
   },
   "95": {
     "inputs": {
-      "select": 3,
+      "select": 1,
       "sel_mode": false,
       "input1": [
         "9",
@@ -444,10 +444,10 @@
   },
   "102": {
     "inputs": {
-      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, scenery, 3d, BREAK,\nbeautiful face, (dyed hair black with vibrant purple highlights:1.2), cropped bangs,\ncateye, black eyeliner, (detailed beautiful eyes:1.3), gray eyes, long eyelashes, eye light,\nhuge plump bimbo lips, lip gloss, looking at viewer,\nBREAK, dramatic shadow, vignetting, volumetric lighting, incredibly detailed skin",
+      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, scenery, 3d, BREAK, __DYNAMIC_PROMPT__, BREAK, (detailed beautiful eyes:1.3), dramatic shadow, vignetting, volumetric lighting, incredibly detailed skin,",
       "parser": "A1111",
       "mean_normalization": true,
-      "multi_conditioning": false,
+      "multi_conditioning": true,
       "use_old_emphasis_implementation": false,
       "with_SDXL": false,
       "ascore": 6,
@@ -503,7 +503,7 @@
       "guide_size": 512,
       "guide_size_for": true,
       "max_size": 1024,
-      "seed": 250444880675103,
+      "seed": 106382403225653,
       "steps": 20,
       "cfg": 5,
       "sampler_name": "dpmpp_2m_sde",
@@ -726,7 +726,7 @@
       "guide_size": 512,
       "guide_size_for": true,
       "max_size": 1024,
-      "seed": 109088123480588,
+      "seed": 594351654257564,
       "steps": 20,
       "cfg": 5,
       "sampler_name": "euler_ancestral",
@@ -1132,7 +1132,7 @@
       "guide_size": 512,
       "guide_size_for": true,
       "max_size": 1024,
-      "seed": 1025500175511905,
+      "seed": 209601021474193,
       "steps": 20,
       "cfg": 5,
       "sampler_name": "euler_ancestral",
@@ -1213,16 +1213,17 @@
       "title": "Face Segmentation (RMBG)"
     }
   },
-  "329": {
+  "335": {
     "inputs": {
+      "filename_prefix": "ComfyUI",
       "images": [
         "95",
         0
       ]
     },
-    "class_type": "SaveImageWebsocket",
+    "class_type": "SaveImage",
     "_meta": {
-      "title": "SaveImageWebsocket"
+      "title": "Save Image"
     }
   }
 }

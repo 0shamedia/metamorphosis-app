@@ -12,7 +12,7 @@
   "app": {
     "withGlobalTauri": true,
     "security": {
-      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: localhost:3000 localhost:8188 ws://localhost:3000 ws://localhost:8188 http://localhost:3000 http://localhost:8188; connect-src 'self' ipc: ws: localhost:3000 localhost:8188 http://localhost:3000 http://localhost:8188 ws://localhost:3000 ws://localhost:8188",
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: asset: asset:https: localhost:3000 localhost:8188 ws://localhost:3000 ws://localhost:8188 http://localhost:3000 http://localhost:8188; connect-src 'self' ipc: ws: localhost:3000 localhost:8188 http://localhost:3000 http://localhost:8188 ws://localhost:3000 ws://localhost:8188",
       "capabilities": [
         {
           "identifier": "main-window-capabilities",
@@ -30,8 +30,15 @@
               "allow": [{ "path": "$APPLOCALDATA/**" }]
             },
             {
-              "identifier": "fs:allow-write-file", 
+              "identifier": "fs:allow-write-file",
               "allow": [{ "path": "$APPLOCALDATA/**" }]
+            },
+            {
+              "identifier": "fs:allow-read-file",
+              "allow": [
+                { "path": "$APPLOCALDATA/Metamorphosis/character_renders/*" },
+                { "path": "../resources/workflows/*" }
+              ]
             },
             {
               "identifier": "http:default",

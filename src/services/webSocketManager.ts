@@ -5,13 +5,17 @@ import {
   ComfyUIProgressData,
   ComfyUIExecutedData,
   ComfyUIExecutionErrorData,
-  ImageOption
+  ImageOption,
+  isSaveImageOutput,
 } from './comfyui/types';
 import useCharacterStore from '../store/characterStore';
 import { GenerationMode } from '../types/generation';
 import { invoke } from '@tauri-apps/api/core';
 
 export const comfyuiWsUrl = 'ws://127.0.0.1:8188/ws';
+export const comfyuiUrl = 'http://127.0.0.1:8188';
+
+
 
 interface WebSocketManagerOptions {
   clientId: string;
@@ -33,7 +37,8 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
   } = options;
 
   const socket = new WebSocket(`${comfyuiWsUrl}?clientId=${clientId}`);
-  socket.binaryType = 'arraybuffer';
+  // Binary data is no longer processed client-side.
+  // socket.binaryType = 'arraybuffer';
 
   const {
     setGenerationProgress,
@@ -44,70 +49,7 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
     lastGenerationMode,
   } = useCharacterStore.getState();
 
-  const FINAL_SAVE_NODE_ID = '329';
   let lastExecutedNodeId: string | null = null;
-  let pendingImageData: ArrayBuffer | null = null;
-
-  const processImage = (imageData: ArrayBuffer) => {
-    console.log(`[WSManager] Processing image from node: ${lastExecutedNodeId}`);
-    
-    // This logic handles intermediate images as previews
-    if (lastExecutedNodeId !== FINAL_SAVE_NODE_ID) {
-      console.log('[WSManager] Displaying preview image.');
-      const blob = new Blob([imageData], { type: 'image/png' });
-      const url = URL.createObjectURL(blob);
-      const imageType = lastGenerationMode === GenerationMode.FaceFromPrompt ? 'face' : 'fullbody';
-      
-      const newImageOption: ImageOption = {
-        id: `temp-id-${Date.now()}-${Math.random()}`,
-        url: url,
-        alt: `Generated ${imageType} preview`,
-        seed: inputSeed,
-      };
-      addImageOption(imageType, newImageOption);
-      // For previews, we might not want to stop the generation process entirely
-      // depending on the desired UX. For now, we'll let the final node control this.
-      return;
-    }
-
-    // This logic handles the final image save
-    console.log('[WSManager] Saving final image to disk...');
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const base64String = (reader.result as string).split(',')[1];
-        const characterId = useCharacterStore.getState().characterId;
-        const imageType = lastGenerationMode === GenerationMode.FaceFromPrompt ? 'face' : 'fullbody';
-
-        if (!characterId) {
-          throw new Error("Cannot save image, characterId is null.");
-        }
-
-        const savedImageDetails = await invoke<ImageOption>('save_image_to_disk', {
-          base64Data: base64String,
-          imageType: imageType,
-          seed: inputSeed,
-          characterId: characterId,
-        });
-
-        if (savedImageDetails) {
-          addImageOption(imageType, savedImageDetails);
-          console.log(`[WSManager] Added new final ${imageType} image option to the store.`);
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error('[WSManager] Error saving final image:', errorMessage);
-        setStoreError(`Failed to save final image: ${errorMessage}`);
-      } finally {
-        // Only stop generation after the final image is processed.
-        setIsGeneratingFace(false);
-        setIsGeneratingFullBody(false);
-        setGenerationProgress(null);
-      }
-    };
-    const blob = new Blob([imageData], { type: 'image/png' });
-    reader.readAsDataURL(blob);
-  };
 
   const getBaseProgress = () => {
     const storeState = useCharacterStore.getState();
@@ -132,49 +74,7 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
 
   socket.onmessage = async (event) => {
     if (event.data instanceof ArrayBuffer) {
-      console.log(`[WSManager] Received binary image data. Last executed node: ${lastExecutedNodeId}`);
-
-      if (lastExecutedNodeId !== FINAL_SAVE_NODE_ID) {
-        console.log(`[WSManager] Ignoring binary data because it's not from the final save node (${FINAL_SAVE_NODE_ID}).`);
-        return;
-      }
-
-      console.log('[WSManager] Processing final image from SaveImageWebsocket node.');
-      const blob = new Blob([event.data], { type: 'image/png' });
-      
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const base64String = (reader.result as string).split(',')[1];
-          const characterId = useCharacterStore.getState().characterId;
-          const imageType = lastGenerationMode === GenerationMode.FaceFromPrompt ? 'face' : 'fullbody';
-
-          if (!characterId) {
-            throw new Error("Cannot save image, characterId is null. This indicates an image was received before a character was created.");
-          }
-
-          const savedImageDetails = await invoke<ImageOption>('save_image_to_disk', {
-            base64Data: base64String,
-            imageType: imageType,
-            seed: inputSeed,
-            characterId: characterId,
-          });
-
-          if (savedImageDetails) {
-            addImageOption(imageType, savedImageDetails);
-            console.log(`[WSManager] Added new ${imageType} image option to the store.`);
-          }
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error('[WSManager] Error saving final image:', errorMessage);
-          setStoreError(`Failed to save final image: ${errorMessage}`);
-        } finally {
-          setIsGeneratingFace(false);
-          setIsGeneratingFullBody(false);
-          setGenerationProgress(null);
-        }
-      };
-      reader.readAsDataURL(blob);
+      console.warn('[WSManager] Received unexpected binary data. This path is deprecated and will be ignored.');
       return;
     }
 
@@ -204,7 +104,7 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
           if (executingData.node === null) {
             setGenerationProgress({
               ...currentProgress,
-              message: "Finalizing image...",
+              message: "Finalizing...",
               step: currentProgress.maxSteps,
             });
           } else {
@@ -225,23 +125,49 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
           });
           break;
         case 'executed':
-           const executedData = message.data as ComfyUIExecutedData;
-           lastExecutedNodeId = executedData.node ?? null;
-           console.log(`[WSManager] Node ${lastExecutedNodeId} executed.`);
+          const executedData = message.data as ComfyUIExecutedData;
+          lastExecutedNodeId = executedData.node ?? null;
+          console.log(`[WSManager] Node ${lastExecutedNodeId} executed.`);
+          
+          if (lastExecutedNodeId === '335' && isSaveImageOutput(executedData.output)) {
+            console.log('[WSManager] SaveImage node (335) executed. Processing output...');
+            for (const image of executedData.output.images) {
+              try {
+                // The image is already saved by ComfyUI. Get it as a data URL to bypass asset protocol issues.
+                const assetUrl = await invoke<string>('get_image_as_data_url', {
+                  filename: image.filename,
+                  subfolder: image.subfolder || '',
+                });
 
-           if (lastExecutedNodeId === FINAL_SAVE_NODE_ID) {
-             console.log('[WSManager] Final save node executed. Awaiting final image data via WebSocket.');
-             setGenerationProgress({
-               ...currentProgress,
-               message: "Finalizing image...",
-               step: currentProgress.maxSteps,
-             });
-           } else {
-              setGenerationProgress({
-               ...currentProgress,
-               message: `Node ${lastExecutedNodeId} complete. Continuing workflow...`,
-             });
-           }
+                const imageType = lastGenerationMode === GenerationMode.FaceFromPrompt || lastGenerationMode === GenerationMode.RegenerateFace ? 'face' : 'fullbody';
+                
+                const newImageOption: ImageOption = {
+                  id: await invoke('generate_uuid'),
+                  url: assetUrl, // Use the permanent asset URL from the backend
+                  seed: inputSeed,
+                  alt: `Generated ${imageType} image with seed ${inputSeed}`,
+                  filename: image.filename,
+                };
+
+                addImageOption(imageType, newImageOption);
+                console.log(`[WSManager] Added new ${imageType} image option to gallery:`, newImageOption);
+                console.log(`[WSManager] Data URL length: ${assetUrl.length}, starts with:`, assetUrl.substring(0, 50) + '...');
+
+              } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.error('[WSManager] Error processing image path:', errorMessage);
+                setStoreError(`Failed to process generated image path: ${errorMessage}`);
+              }
+            }
+            setIsGeneratingFace(false);
+            setIsGeneratingFullBody(false);
+            setGenerationProgress(null);
+          } else {
+            setGenerationProgress({
+             ...currentProgress,
+             message: `Node ${lastExecutedNodeId} complete. Continuing...`,
+           });
+          }
           break;
         case 'execution_error':
           const errorData = message.data as ComfyUIExecutionErrorData;
@@ -273,7 +199,7 @@ export function createWebSocketManager(options: WebSocketManagerOptions) {
   socket.onclose = (event) => {
     console.log(`[WSManager] ComfyUI WebSocket closed for clientId: ${clientId}, promptId: ${promptId}. Code: ${event.code}, Reason: ${event.reason}`);
     const finalProgress = useCharacterStore.getState().generationProgress;
-    if (finalProgress && finalProgress.message !== "Generation complete! Awaiting image data..." && !event.wasClean) {
+    if (finalProgress && !event.wasClean) {
         setStoreError('WebSocket connection closed unexpectedly.');
         setIsGeneratingFace(false);
         setIsGeneratingFullBody(false);

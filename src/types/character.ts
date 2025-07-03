@@ -33,5 +33,6 @@ export interface ImageOption {
   url: string; // This would be the blob URL or data URL from ComfyUI
   alt: string; // Alt text, e.g., "Face option 1"
   seed?: string | number; // The seed used for generation, crucial for naming and reproducibility
+  filename?: string; // The filename of the image on disk
   comfyPrompt?: Record<string, any>; // Optional: store the exact prompt sent to ComfyUI
 }

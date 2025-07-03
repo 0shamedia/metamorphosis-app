@@ -63,11 +63,22 @@ export interface ComfyUIExecutedOutputNode {
   images: ComfyUIImageOutput[];
   [key: string]: any; // For other output types like text
 }
+
+// Specific output type for the SaveImage node (and potentially others)
+export interface ComfyUISaveImageOutput {
+  images: ComfyUIImageOutput[];
+}
+
+// Type guard to check for the SaveImage output structure
+export function isSaveImageOutput(
+  output: any,
+): output is ComfyUISaveImageOutput {
+  return output && Array.isArray(output.images);
+}
+
 export interface ComfyUIExecutedData {
   prompt_id: string;
-  output: {
-    [nodeId: string]: ComfyUIExecutedOutputNode;
-  };
+  output: { [nodeId: string]: ComfyUIExecutedOutputNode } | ComfyUISaveImageOutput;
   node?: string; // Sometimes present, indicates the node that finished
 }
 export interface ComfyUIExecutedMessage extends ComfyUIWebSocketMessageBase {
@@ -122,4 +133,9 @@ export interface ImageOption { // Copied from comfyuiService.ts, might need to b
     subfolder?: string;
     type?: 'output' | 'temp' | 'input';
 seed?: string | number; // Added to match global ImageOption type
+}
+
+export interface ImageSaveResult {
+  assetUrl: string;
+  filePath: string;
 }

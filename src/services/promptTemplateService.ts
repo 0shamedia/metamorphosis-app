@@ -1,12 +1,13 @@
 import { GenerationMode } from '@/types/generation';
+import { CharacterAttributes } from '@/types/character';
 
 // Hardcoded templates for now. These can be moved to a config file later.
 const templates: Record<GenerationMode, string> = {
   [GenerationMode.FaceFromPrompt]: "photograph of a woman's face, BREAK, detailed skin, BREAK, cinematic lighting",
-  [GenerationMode.FaceFromImage]: "photograph of a woman's face, BREAK, detailed skin, BREAK, cinematic lighting",
-  [GenerationMode.FullBodyFromPrompt]: "full body photograph of a woman, BREAK, standing in a futuristic city, BREAK, wearing a cyberpunk jacket",
-  [GenerationMode.ClothingFromImage]: "a woman wearing BREAK, detailed clothing, BREAK, studio lighting",
+  [GenerationMode.BodyFromPrompt]: "full body photograph of a woman, BREAK, standing in a futuristic city, BREAK, wearing a cyberpunk jacket",
   [GenerationMode.ClothingFromPrompt]: "a woman wearing BREAK, detailed clothing, BREAK, studio lighting",
+  [GenerationMode.RegenerateFace]: "photograph of a woman's face, BREAK, detailed skin, BREAK, cinematic lighting", // Placeholder
+  [GenerationMode.RegenerateBody]: "full body photograph of a woman, BREAK, standing in a futuristic city, BREAK, wearing a cyberpunk jacket", // Placeholder
 };
 
 /**
@@ -38,6 +39,49 @@ export function build_prompt(template: string, dynamic_content: string[]): strin
       result += parts.slice(dynamic_content.length + 1).join('');
   }
 
-  // Clean up extra commas and whitespace
-  return result.replace(/, ,/g, ',').replace(/, /g, ' ').trim();
-}
+    // Clean up extra commas and whitespace
+    return result.replace(/, ,/g, ',').replace(/, /g, ' ').trim();
+  }
+  
+  /**
+   * Builds a dynamic prompt string from character attributes.
+   * @param attributes The character creation form state.
+   * @returns A comma-separated string of prompt tags.
+   */
+  export function buildCharacterPrompt(attributes: CharacterAttributes): string {
+    const tags: string[] = ['clothed'];
+  
+    // Gender/Anatomy Logic
+    if (attributes.anatomy === 'Male') {
+      if (attributes.genderExpression > 66) {
+        tags.push('1boy', 'feminine');
+      } else if (attributes.genderExpression < 33) {
+        tags.push('1boy');
+      } else {
+        tags.push('1boy', 'androgynous');
+      }
+    } else if (attributes.anatomy === 'Female') {
+      if (attributes.genderExpression > 66) {
+        tags.push('1girl');
+      } else {
+        tags.push('1girl', 'androgynous');
+      }
+    }
+  
+    // Other Attributes
+    if (attributes.hairColor) {
+      tags.push(`${attributes.hairColor.toLowerCase()} hair`);
+    }
+    if (attributes.eyeColor) {
+      tags.push(`${attributes.eyeColor.toLowerCase()} eyes`);
+    }
+    if (attributes.bodyType) {
+      tags.push(attributes.bodyType.toLowerCase());
+    }
+    if (attributes.ethnicity) {
+      tags.push(attributes.ethnicity.toLowerCase());
+    }
+  
+  
+    return tags.join(', ');
+  }

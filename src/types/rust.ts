@@ -6,6 +6,7 @@ import { GenerationMode } from "./generation";
  * It is the TypeScript representation of the `CharacterGenerationState` struct in Rust.
  */
 export interface CharacterGenerationState {
+  workflowJson: string;
   generationMode: GenerationMode;
   positivePrompt: string;
   negativePrompt: string;

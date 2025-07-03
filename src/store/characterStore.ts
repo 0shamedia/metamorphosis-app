@@ -48,9 +48,11 @@ interface CharacterState {
 
   // V3 State
   lastGenerationMode: GenerationMode | null;
+  livePreviewUrl: string | null;
 }
 
 interface CharacterActions {
+  setLivePreviewUrl: (url: string | null) => void;
   setCharacterAttribute: <K extends keyof CharacterAttributes>(attribute: K, value: CharacterAttributes[K]) => void;
   setTags: (tags: Tag[]) => void;
   setLoading: (isLoading: boolean) => void;
@@ -70,6 +72,7 @@ interface CharacterActions {
   setClientId: (id: string | null) => void;
   setGenerationProgress: (progress: GenerationProgress | null) => void;
 
+  setCharacterId: (characterId: string) => void;
   // Action for finalization
   setFinalizedCharacter: (data: {
     characterId: string;
@@ -131,7 +134,10 @@ const useCharacterStore = create<CharacterState & CharacterActions>((set) => ({
 
   // V3
   lastGenerationMode: null,
-
+  livePreviewUrl: null,
+ 
+  setCharacterId: (characterId) => set(() => ({ characterId })),
+  setLivePreviewUrl: (url) => set(() => ({ livePreviewUrl: url })),
   setCharacterAttribute: (attribute, value) =>
     set((state) => ({
       attributes: {
@@ -222,6 +228,7 @@ const useCharacterStore = create<CharacterState & CharacterActions>((set) => ({
     latestImageBlob: null,
     latestImageUrl: null,
     lastGenerationMode: null,
+    livePreviewUrl: null,
   })),
 }));
 

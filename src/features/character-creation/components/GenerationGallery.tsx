@@ -1,5 +1,6 @@
 import React from 'react';
 import { ImageOption } from '@/types/character';
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 interface GenerationGalleryProps {
   images: ImageOption[];
@@ -18,6 +19,29 @@ const GenerationGallery: React.FC<GenerationGalleryProps> = ({
   selectedImageId,
   itemType = 'face',
 }) => {
+  const getSafeImageUrl = (url: string): string => {
+    if (!url) return '';
+    
+    // Already a valid URL (including data URLs)
+    if (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('asset:') || url.startsWith('data:')) {
+      return url;
+    }
+    
+    // For file:// URLs, use convertFileSrc (though we shouldn't get these anymore)
+    if (url.startsWith('file:')) {
+      try {
+        const convertedUrl = convertFileSrc(url);
+        console.log('[GenerationGallery] Converted URL:', convertedUrl);
+        return convertedUrl;
+      } catch (error) {
+        console.error('[GenerationGallery] Failed to convert file URL:', error);
+        return url;
+      }
+    }
+    
+    return url;
+  };
+
   const getItemClasses = () => {
     if (itemType === 'face') {
       return 'w-32 h-32 md:w-36 md:h-36 rounded-full'; // Circular for faces
@@ -78,7 +102,7 @@ const GenerationGallery: React.FC<GenerationGalleryProps> = ({
             `}
             // z-index for selected item to be on top of others during overlap
             style={{
-              backgroundImage: `url(${image.url})`,
+              backgroundImage: `url(${getSafeImageUrl(image.url)})`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
               // marginLeft: itemType === 'face' && index > 0 ? '-64px' : '0', // Apply negative margin for overlap, handled by space-x now

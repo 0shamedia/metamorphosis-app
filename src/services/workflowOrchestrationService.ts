@@ -1,8 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import useCharacterStore from '@/store/characterStore';
 import { GenerationMode } from '@/types/generation';
+import { CharacterAttributes } from '@/types/character';
 import { CharacterGenerationState } from '@/types/rust';
 import * as characterStateService from './characterStateService';
+import * as promptTemplateService from './promptTemplateService';
 import { createWebSocketManager } from './webSocketManager';
 
 interface GenerationResponse {
@@ -16,7 +18,10 @@ async function runGeneration(generationState: CharacterGenerationState) {
     setError(null);
 
     try {
+        // The full state, including the workflow JSON, is passed directly to the backend.
+        console.log("Generation State being sent to Rust:", JSON.stringify(generationState, null, 2));
         const response = await invoke<GenerationResponse>('generate_character', { state: generationState });
+        
         createWebSocketManager({
             clientId: response.client_id,
             promptId: response.prompt_id,
@@ -30,13 +35,15 @@ async function runGeneration(generationState: CharacterGenerationState) {
     }
 }
 
-export async function generateFace(positivePrompt: string, negativePrompt: string): Promise<void> {
+export async function generateFace(attributes: CharacterAttributes, negativePrompt: string): Promise<void> {
     characterStateService.setLastGenerationMode(GenerationMode.FaceFromPrompt);
     const optimalSettings = characterStateService.get_optimal_workflow_settings();
+    const workflowString = await invoke<string>('get_unified_workflow');
 
     const generationState: CharacterGenerationState = {
+        workflowJson: workflowString,
         generationMode: GenerationMode.FaceFromPrompt,
-        positivePrompt: positivePrompt,
+        positivePrompt: promptTemplateService.buildCharacterPrompt(attributes),
         negativePrompt: negativePrompt,
         seed: Math.floor(Math.random() * 1_000_000_000),
         steps: 30,
@@ -51,31 +58,26 @@ export async function generateFace(positivePrompt: string, negativePrompt: strin
     await runGeneration(generationState);
 }
 
-export async function generateBodyFromPrompt(faceImagePath: string, positivePrompt: string, negativePrompt: string): Promise<void> {
+export async function generateBodyFromPrompt(baseFaceImageFilename: string, attributes: CharacterAttributes): Promise<void> {
     characterStateService.setLastGenerationMode(GenerationMode.BodyFromPrompt);
     const optimalSettings = characterStateService.get_optimal_workflow_settings();
+    const workflowString = await invoke<string>('get_unified_workflow');
+    const negativePrompt = "bad quality, worst quality, deformed, ugly, disfigured, missing limbs";
 
-    try {
-        const tempFilename = await invoke<string>('prepare_image_for_edit', { permanentPath: faceImagePath });
+    const generationState: CharacterGenerationState = {
+        workflowJson: workflowString,
+        generationMode: GenerationMode.BodyFromPrompt,
+        positivePrompt: promptTemplateService.buildCharacterPrompt(attributes),
+        negativePrompt: negativePrompt,
+        seed: Math.floor(Math.random() * 1_000_000_000),
+        steps: 30,
+        cfg: optimalSettings.cfg,
+        samplerName: optimalSettings.samplerName,
+        scheduler: optimalSettings.scheduler,
+        denoise: 1.0,
+        baseFaceImageFilename: baseFaceImageFilename,
+        baseBodyImageFilename: null,
+    };
 
-        const generationState: CharacterGenerationState = {
-            generationMode: GenerationMode.BodyFromPrompt,
-            positivePrompt: positivePrompt,
-            negativePrompt: negativePrompt,
-            seed: Math.floor(Math.random() * 1_000_000_000),
-            steps: 30,
-            cfg: optimalSettings.cfg,
-            samplerName: optimalSettings.samplerName,
-            scheduler: optimalSettings.scheduler,
-            denoise: 1.0,
-            baseFaceImageFilename: tempFilename,
-            baseBodyImageFilename: null,
-        };
-
-        await runGeneration(generationState);
-    } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        console.error("Error preparing image for edit:", errorMessage);
-        useCharacterStore.getState().setError(errorMessage);
-    }
+    await runGeneration(generationState);
 }

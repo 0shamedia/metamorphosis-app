@@ -9,11 +9,11 @@ import StyledToggle from '@/components/ui/StyledToggle';
 import useCharacterStore from '@/store/characterStore';
 import { ImageOption, CharacterAttributes } from '@/types/character';
 import { generateFace, generateBodyFromPrompt } from '@/services/workflowOrchestrationService';
-import { get_dynamic_prompt_content } from '@/services/characterStateService';
-import { get_template, build_prompt } from '@/services/promptTemplateService';
+import { get_template, buildCharacterPrompt } from '@/services/promptTemplateService';
 import { GenerationMode } from '@/types/generation';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 
+// The ImageSaveResult interface is no longer needed.
 
 // Placeholder for particle generation logic (can be moved to a separate component)
 const Particles: React.FC = () => {
@@ -90,19 +90,58 @@ const CharacterCreationPage: React.FC = () => {
     setError: setCharacterError, // Action to clear error if needed
     setFinalizedCharacter, // Action for finalization
     // New state for image lifecycle
-    latestImageBlob,
-    latestImageUrl,
-    setLatestImage,
     savedFaceImagePath,
     savedBodyImagePath,
     setSavedFaceImagePath,
     setSavedBodyImagePath,
     lastGenerationMode,
-    tags
+    tags,
+    livePreviewUrl,
+    setLivePreviewUrl,
+    setCharacterId,
   } = useCharacterStore();
 
   const [activePreview, setActivePreview] = useState<'face' | 'body'>('face');
   const [isFinalizing, setIsFinalizing] = useState(false); // State for finalization loading
+
+  const getDisplayUrl = (url: string | null | undefined): string | null => {
+    if (!url) return null;
+    
+    // Handle different URL types that don't need conversion
+    if (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('asset:') || url.startsWith('data:')) {
+      return url; // Already a valid URL
+    }
+    
+    // For file:// URLs, use convertFileSrc (though we shouldn't get these anymore)
+    if (url.startsWith('file:')) {
+      try {
+        const convertedUrl = convertFileSrc(url);
+        console.log(`[getDisplayUrl] Converting ${url} to ${convertedUrl}`);
+        return convertedUrl;
+      } catch (error) {
+        console.error(`Failed to convert file src for ${url}:`, error);
+        return url;
+      }
+    }
+    
+    return url;
+  };
+
+  const initializeCharacter = async () => {
+    try {
+      const newCharacterId = await invoke<string>('generate_uuid');
+      setCharacterId(newCharacterId);
+      console.log(`[CharacterCreationPage] Initialized character with ID: ${newCharacterId}`);
+    } catch (error) {
+      console.error("Failed to generate UUID for character:", error);
+      setCharacterError("Could not initialize character session. Please refresh and try again.");
+    }
+  };
+
+  useEffect(() => {
+    // On component mount, create a new character ID for the session.
+    initializeCharacter();
+  }, []);
 
 
   // Diagnostic useEffect to log state changes
@@ -123,14 +162,12 @@ const CharacterCreationPage: React.FC = () => {
     setFaceOptions([]);
     setSelectedFace(null);
     setCharacterError(null);
+    setLivePreviewUrl(null); // Clear previous preview
 
     try {
-      const dynamicContent = await get_dynamic_prompt_content(attributes, tags);
-      const template = await get_template(GenerationMode.FaceFromPrompt);
-      const positivePrompt = build_prompt(template, dynamicContent);
       const negativePrompt = "bad quality, worst quality, deformed, ugly, disfigured";
 
-      await generateFace(positivePrompt, negativePrompt);
+      await generateFace(attributes, negativePrompt);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("Error in handleAttributeSubmit:", errorMessage);
@@ -141,59 +178,35 @@ const CharacterCreationPage: React.FC = () => {
 
   const handleFaceSelect = (image: ImageOption) => {
     setSelectedFace(image);
-    // setActivePreview('body'); // Optionally switch preview
+    setLivePreviewUrl(null); // Clear live preview on selection
   };
   
   const confirmFaceSelectionAndGenerateBody = async () => {
-    if (!selectedFace) {
-      setCharacterError("A face must be selected before generating a body.");
+    if (!selectedFace || !selectedFace.filename) {
+      setCharacterError("A face with a valid filename must be selected before generating a body.");
       return;
     }
-
-    // Save the selected face first
+  
     try {
-      const reader = new FileReader();
-      const response = await fetch(selectedFace.url);
-      const blob = await response.blob();
-      
-      reader.readAsDataURL(blob);
-      reader.onloadend = async () => {
-        try {
-          const base64data = reader.result as string;
-          const base64Image = base64data.split(',')[1];
-
-          const permanentPath = await invoke<string>('save_image_to_disk', {
-            imageDataBase64: base64Image,
-            filenamePrefix: 'face',
-          });
-
-          setSavedFaceImagePath(permanentPath);
-          setCreationStep('bodySelection');
-          
-          // Now generate the body
-          setIsGeneratingFullBody(true);
-          setFullBodyOptions([]);
-          setSelectedFullBody(null);
-          setCharacterError(null);
-
-          const dynamicContent = await get_dynamic_prompt_content(attributes, tags);
-          const template = await get_template(GenerationMode.BodyFromPrompt);
-          const positivePrompt = build_prompt(template, dynamicContent);
-          const negativePrompt = "bad quality, worst quality, deformed, ugly, disfigured, missing limbs";
-
-          await generateBodyFromPrompt(permanentPath, positivePrompt, negativePrompt);
-
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error("Error during image save or body generation:", errorMessage);
-          setCharacterError(`Failed to save face or generate body: ${errorMessage}`);
-          setIsGeneratingFullBody(false);
-        }
-      };
+      // The image is already saved. We just need its filename.
+      setSavedFaceImagePath(selectedFace.url); // The asset URL is the permanent path
+      setCreationStep('bodySelection');
+  
+      // Now generate the body
+      setIsGeneratingFullBody(true);
+      setFullBodyOptions([]);
+      setSelectedFullBody(null);
+      setCharacterError(null);
+      setLivePreviewUrl(null);
+  
+      // The filename from the selected face is passed to the orchestration service.
+      await generateBodyFromPrompt(selectedFace.filename, attributes);
+  
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error("Error fetching blob for saving:", errorMessage);
-      setCharacterError(`Failed to fetch image for saving: ${errorMessage}`);
+      console.error("Error during body generation:", errorMessage);
+      setCharacterError(`Failed to generate body: ${errorMessage}`);
+      setIsGeneratingFullBody(false);
     }
   };
 
@@ -204,8 +217,11 @@ const CharacterCreationPage: React.FC = () => {
 
   const handleBodySelect = (image: ImageOption) => {
     setSelectedFullBody(image);
+    setSavedBodyImagePath(image.url); // The asset URL is the permanent path
     setCharacterImageUrl(image.url); // Set final character image for preview
     setActivePreview('body');
+    setLivePreviewUrl(null); // Clear live preview on selection
+    console.log(`Body image selected and path set to ${image.url}`);
   };
 
   const handleFinalizeCharacter = async () => {
@@ -218,8 +234,10 @@ const CharacterCreationPage: React.FC = () => {
     setCharacterError(null);
 
     try {
-      const characterId = await invoke<string>('generate_uuid');
-
+      const { characterId } = useCharacterStore.getState();
+      if (!characterId) {
+        throw new Error("Character ID not found. Cannot finalize.");
+      }
       setFinalizedCharacter({
         characterId: characterId,
         attributes: attributes,
@@ -269,49 +287,6 @@ const CharacterCreationPage: React.FC = () => {
     }
   };
 
-  const handleSaveImage = async () => {
-    if (!latestImageBlob) {
-      setCharacterError("No image blob available to save.");
-      return;
-    }
-
-    try {
-      const reader = new FileReader();
-      reader.readAsDataURL(latestImageBlob);
-      reader.onloadend = async () => {
-        try {
-          const base64data = reader.result as string;
-          const base64Image = base64data.split(',')[1];
-
-          const prefix = lastGenerationMode === GenerationMode.FaceFromPrompt ? 'face' : 'body';
-
-          const permanentPath = await invoke<string>('save_image_to_disk', {
-            imageDataBase64: base64Image,
-            filenamePrefix: prefix,
-          });
-
-          if (lastGenerationMode === GenerationMode.FaceFromPrompt) {
-            setSavedFaceImagePath(permanentPath);
-          } else {
-            setSavedBodyImagePath(permanentPath);
-          }
-
-          console.log(`Image saved to permanent path and state updated: ${permanentPath}`);
-          alert(`Image saved to: ${permanentPath}`);
-          setLatestImage(null, null);
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error("Error during image save operation:", errorMessage);
-          setCharacterError(`Failed to save image: ${errorMessage}`);
-        }
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error("Error preparing to save image:", errorMessage);
-      setCharacterError(`Failed to prepare image for saving: ${errorMessage}`);
-    }
-  };
-  
   const getPageTitle = () => {
     switch (creationStep) {
       case 'attributes': return "Create Your Character";
@@ -354,10 +329,10 @@ const CharacterCreationPage: React.FC = () => {
               style={{ height: activePreview === 'face' ? '225px' : '350px' }}
             >
             <div className={`character-portrait w-[225px] h-[225px] bg-black/30 rounded-full flex items-center justify-center border-2 border-pink-500/30 text-white/30 text-sm shadow-inner-pink transition-all duration-300 ease-in-out ${activePreview === 'face' ? 'opacity-100 scale-100' : 'opacity-0 scale-90 absolute'}`}>
-              {selectedFace ? <img src={selectedFace.url} alt="Selected Face" className="w-full h-full object-cover rounded-full"/> : 'Face Preview'}
+              {selectedFace ? <img src={getDisplayUrl(selectedFace.url) || ''} alt="Selected Face" className="w-full h-full object-cover rounded-full"/> : 'Face Preview'}
             </div>
             <div className={`character-fullbody w-[200px] h-[350px] bg-black/30 rounded-xl flex items-center justify-center border-2 border-pink-500/30 text-white/30 text-sm shadow-inner-pink transition-all duration-300 ease-in-out ${activePreview === 'body' ? 'opacity-100 scale-100 relative' : 'opacity-0 scale-90 absolute'}`}>
-              {selectedFullBody ? <img src={selectedFullBody.url} alt="Selected Full Body" className="w-full h-full object-cover rounded-xl"/> : (characterImageUrl ? <img src={characterImageUrl} alt="Character Preview" className="w-full h-full object-cover rounded-xl"/> : 'Full Body')}
+              {selectedFullBody ? <img src={getDisplayUrl(selectedFullBody.url) || ''} alt="Selected Full Body" className="w-full h-full object-cover rounded-xl"/> : (characterImageUrl ? <img src={getDisplayUrl(characterImageUrl) || ''} alt="Character Preview" className="w-full h-full object-cover rounded-xl"/> : 'Full Body')}
             </div>
           </div>
           
@@ -422,8 +397,8 @@ const CharacterCreationPage: React.FC = () => {
                  <AstralMirrorDisplay
                    isGenerating={isGeneratingFace}
                    progress={generationProgress}
-                   previewImageUrl={selectedFace?.url || (faceOptions.length > 0 ? faceOptions[0].url : null)}
-                   currentStepName="Attributes" // This will show "Generating Face..." internally if isGeneratingFace is true
+                   previewImageUrl={getDisplayUrl(livePreviewUrl) || getDisplayUrl(selectedFace?.url) || getDisplayUrl(faceOptions.length > 0 ? faceOptions[faceOptions.length - 1].url : undefined)}
+                   currentStepName="Attributes"
                  />
 
                  <button
@@ -436,6 +411,7 @@ const CharacterCreationPage: React.FC = () => {
                  >
                      {isGeneratingFace ? "Generating Face..." : "Generate Face"}
                  </button>
+
 
                  {(isGeneratingFace || faceOptions.length > 0) && (
                    <GenerationGallery
@@ -471,9 +447,9 @@ const CharacterCreationPage: React.FC = () => {
               <div className="w-full max-w-md aspect-[776/1344] flex justify-center"> {/* Removed max-h-[65vh] */}
                 <AstralMirrorDisplay
                   isGenerating={isGeneratingFullBody}
-                progress={generationProgress}
-                previewImageUrl={selectedFullBody?.url || (fullBodyOptions.length > 0 ? fullBodyOptions[0].url : null)}
-                currentStepName="Full Body"
+                  progress={generationProgress}
+                  previewImageUrl={getDisplayUrl(livePreviewUrl) || getDisplayUrl(selectedFullBody?.url) || getDisplayUrl(fullBodyOptions.length > 0 ? fullBodyOptions[fullBodyOptions.length - 1].url : undefined)}
+                  currentStepName="Full Body"
                 />
               </div>
               <GenerationGallery
@@ -504,7 +480,7 @@ const CharacterCreationPage: React.FC = () => {
               <h2 className="text-3xl font-bold text-pink-400 mb-4">Character Creation Complete!</h2>
               <p className="text-lg text-gray-300 mb-6">Your unique adventurer is ready.</p>
               {selectedFullBody && (
-                <img src={selectedFullBody.url} alt="Final Character" className="w-64 h-auto mx-auto rounded-lg shadow-lg mb-6" />
+                <img src={getDisplayUrl(selectedFullBody.url) || ''} alt="Final Character" className="w-64 h-auto mx-auto rounded-lg shadow-lg mb-6" />
               )}
               <button
                 onClick={() => router.push('/game')} // Navigate to game start
