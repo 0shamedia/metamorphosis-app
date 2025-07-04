@@ -12,6 +12,9 @@ import { generateFace, generateBodyFromPrompt } from '@/services/workflowOrchest
 import { get_template, buildCharacterPrompt } from '@/services/promptTemplateService';
 import { GenerationMode } from '@/types/generation';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import TagPanel from '@/features/tags/components/TagPanel';
+import TagDisplay from '@/features/tags/components/TagDisplay';
+import { useTagStore } from '@/store/tagStore';
 
 // The ImageSaveResult interface is no longer needed.
 
@@ -101,8 +104,16 @@ const CharacterCreationPage: React.FC = () => {
     setCharacterId,
   } = useCharacterStore();
 
+  // Tag store integration
+  const {
+    loadTags,
+    activeTags,
+    currentEffects
+  } = useTagStore();
+
   const [activePreview, setActivePreview] = useState<'face' | 'body'>('face');
   const [isFinalizing, setIsFinalizing] = useState(false); // State for finalization loading
+  const [tagPanelExpanded, setTagPanelExpanded] = useState(false);
 
   const getDisplayUrl = (url: string | null | undefined): string | null => {
     if (!url) return null;
@@ -139,8 +150,16 @@ const CharacterCreationPage: React.FC = () => {
   };
 
   useEffect(() => {
-    // On component mount, create a new character ID for the session.
-    initializeCharacter();
+    // Only reset state if we're starting a completely new character (no characterId exists)
+    const currentCharacterId = useCharacterStore.getState().characterId;
+    if (!currentCharacterId) {
+      // Reset any previous character state before starting a new one
+      resetCreationState();
+      // On component mount, create a new character ID for the session.
+      initializeCharacter();
+    }
+    // Load tags
+    loadTags();
   }, []);
 
 
@@ -190,6 +209,15 @@ const CharacterCreationPage: React.FC = () => {
     try {
       // The image is already saved. We just need its filename.
       setSavedFaceImagePath(selectedFace.url); // The asset URL is the permanent path
+      
+      // Now that face is confirmed, apply anatomy tags
+      const { addTag: addCharacterTag, activeTags } = useCharacterStore.getState();
+      if (attributes.anatomy === 'Female' && !activeTags.includes('1girl')) {
+        addCharacterTag('1girl', 'automatic');
+      } else if (attributes.anatomy === 'Male' && !activeTags.includes('1boy')) {
+        addCharacterTag('1boy', 'automatic');
+      }
+      
       setCreationStep('bodySelection');
   
       // Now generate the body
@@ -211,8 +239,25 @@ const CharacterCreationPage: React.FC = () => {
   };
 
   const handleRegenerateFullBody = async () => {
-    console.log("TODO: Implement handleRegenerateFullBody");
-    setCharacterError("Full body regeneration is not yet implemented with the new architecture.");
+    if (!selectedFace || !selectedFace.filename) {
+      setCharacterError("No face selected for body regeneration.");
+      return;
+    }
+
+    try {
+      setIsGeneratingFullBody(true);
+      setCharacterError(null);
+      setLivePreviewUrl(null);
+      
+      // Generate another body using the same face reference
+      await generateBodyFromPrompt(selectedFace.filename, attributes);
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Error during body regeneration:", errorMessage);
+      setCharacterError(`Failed to regenerate body: ${errorMessage}`);
+      setIsGeneratingFullBody(false);
+    }
   };
 
   const handleBodySelect = (image: ImageOption) => {
@@ -221,7 +266,7 @@ const CharacterCreationPage: React.FC = () => {
     setCharacterImageUrl(image.url); // Set final character image for preview
     setActivePreview('body');
     setLivePreviewUrl(null); // Clear live preview on selection
-    console.log(`Body image selected and path set to ${image.url}`);
+    console.log(`Body image selected. Filename: ${image.filename}, Seed: ${image.seed}`);
   };
 
   const handleFinalizeCharacter = async () => {
@@ -357,11 +402,75 @@ const CharacterCreationPage: React.FC = () => {
         </div>
 
         <div
-          className="tags-section border border-white/10 rounded-xl p-5 flex-shrink-0"
+          className={`tags-section border border-white/10 rounded-xl overflow-hidden transition-all duration-300 ease-in-out ${tagPanelExpanded ? 'flex-1 min-h-[400px]' : 'flex-shrink-0 max-h-[200px]'}`}
           style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)' }}
         >
-          <h3 className="stats-title text-lg font-semibold mb-4 text-white/90">Tags</h3>
-          {/* Tags can be dynamic later */}
+          <div className="flex items-center justify-between p-5 border-b border-white/10">
+            <h3 className="stats-title text-lg font-semibold text-white/90">Tags</h3>
+            <div className="flex items-center gap-2">
+              {activeTags.length > 0 && (
+                <span className="text-xs bg-purple-500/20 text-purple-300 px-2 py-1 rounded-full">
+                  {activeTags.length}
+                </span>
+              )}
+              <button
+                onClick={() => setTagPanelExpanded(!tagPanelExpanded)}
+                className="text-white/60 hover:text-white/90 transition-colors"
+                title={tagPanelExpanded ? "Collapse" : "Expand"}
+              >
+                <svg 
+                  className={`w-4 h-4 transform transition-transform ${tagPanelExpanded ? 'rotate-180' : ''}`}
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          
+          {tagPanelExpanded ? (
+            <div className="h-full">
+              <TagPanel
+                character={attributes}
+                className="h-full bg-transparent border-0 shadow-none"
+                layout="inline"
+                showEffectVisualizer={true}
+                showAcquisitionFlow={true}
+              />
+            </div>
+          ) : (
+            <div className="p-4">
+              {activeTags.length === 0 ? (
+                <p className="text-white/50 text-sm">No active tags yet</p>
+              ) : (
+                <div className="space-y-2">
+                  {activeTags.slice(0, 3).map((tagId) => (
+                    <TagDisplay 
+                      key={tagId} 
+                      tagId={tagId}
+                      showIcon={true}
+                      showRarity={false}
+                    />
+                  ))}
+                  {activeTags.length > 3 && (
+                    <div className="text-xs text-white/50">
+                      +{activeTags.length - 3} more...
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {currentEffects && currentEffects.combinationBonuses.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-white/10">
+                  <div className="text-xs text-purple-300">
+                    🎉 {currentEffects.combinationBonuses.length} combo{currentEffects.combinationBonuses.length !== 1 ? 's' : ''} active
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </aside>
 
@@ -482,12 +591,25 @@ const CharacterCreationPage: React.FC = () => {
               {selectedFullBody && (
                 <img src={getDisplayUrl(selectedFullBody.url) || ''} alt="Final Character" className="w-64 h-auto mx-auto rounded-lg shadow-lg mb-6" />
               )}
-              <button
-                onClick={() => router.push('/game')} // Navigate to game start
-                className="px-8 py-3 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg shadow-md transition-transform duration-150 ease-in-out hover:scale-105"
-              >
-                Begin Your Adventure!
-              </button>
+              
+              <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                <button
+                  onClick={() => router.push('/tag-testing')} // Navigate to tag testing
+                  className="px-6 py-3 bg-purple-500 hover:bg-purple-600 text-white font-semibold rounded-lg shadow-md transition-transform duration-150 ease-in-out hover:scale-105"
+                >
+                  🏷️ Test Tags
+                </button>
+                <button
+                  onClick={() => router.push('/game')} // Navigate to game start
+                  className="px-8 py-3 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg shadow-md transition-transform duration-150 ease-in-out hover:scale-105"
+                >
+                  Begin Your Adventure!
+                </button>
+              </div>
+              
+              <p className="text-sm text-gray-400 mt-4">
+                Try the tag testing scene to experiment with tag effects and combinations!
+              </p>
             </div>
           )}
 

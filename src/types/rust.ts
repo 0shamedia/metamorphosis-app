@@ -18,4 +18,6 @@ export interface CharacterGenerationState {
   denoise: number;
   baseFaceImageFilename?: string | null;
   baseBodyImageFilename?: string | null;
+  characterId?: string | null;
+  context?: string | null;
 }

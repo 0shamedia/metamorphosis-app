@@ -51,20 +51,33 @@ export function build_prompt(template: string, dynamic_content: string[]): strin
   export function buildCharacterPrompt(attributes: CharacterAttributes): string {
     const tags: string[] = ['clothed'];
   
-    // Gender/Anatomy Logic
-    if (attributes.anatomy === 'Male') {
-      if (attributes.genderExpression > 66) {
-        tags.push('1boy', 'feminine');
-      } else if (attributes.genderExpression < 33) {
-        tags.push('1boy');
-      } else {
-        tags.push('1boy', 'androgynous');
-      }
-    } else if (attributes.anatomy === 'Female') {
-      if (attributes.genderExpression > 66) {
-        tags.push('1girl');
-      } else {
-        tags.push('1girl', 'androgynous');
+    // Enhanced gender expression logic (0=masculine, 100=feminine)
+    if (attributes.genderExpression !== undefined) {
+      const expression = attributes.genderExpression;
+      console.log(`[PromptTemplateService] DEBUG: genderExpression=${expression}, anatomy=${attributes.anatomy}`);
+      
+      if (attributes.anatomy === 'Male') {
+        if (expression > 66) {
+          console.log(`[PromptTemplateService] Adding: 1boy, feminine (expression=${expression})`);
+          tags.push('1boy', 'feminine');
+        } else if (expression < 33) {
+          console.log(`[PromptTemplateService] Adding: 1boy, masculine (expression=${expression})`);
+          tags.push('1boy', 'masculine');
+        } else {
+          console.log(`[PromptTemplateService] Adding: 1boy, androgynous (expression=${expression})`);
+          tags.push('1boy', 'androgynous');
+        }
+      } else if (attributes.anatomy === 'Female') {
+        if (expression > 66) {
+          console.log(`[PromptTemplateService] Adding: 1girl, feminine (expression=${expression})`);
+          tags.push('1girl', 'feminine');
+        } else if (expression < 33) {
+          console.log(`[PromptTemplateService] Adding: 1girl, masculine (expression=${expression})`);
+          tags.push('1girl', 'masculine');
+        } else {
+          console.log(`[PromptTemplateService] Adding: 1girl, androgynous (expression=${expression})`);
+          tags.push('1girl', 'androgynous');
+        }
       }
     }
   

@@ -1,0 +1,163 @@
+{
+  "version": "1.0.0",
+  "description": "Tag category hierarchy and metadata",
+  "categories": {
+    "appearance": {
+      "name": "Appearance",
+      "description": "Physical appearance and visual characteristics",
+      "icon": "👁️",
+      "color": "#FF6B6B",
+      "subcategories": {
+        "body": {
+          "name": "Body",
+          "description": "Body shape, size, and physical form",
+          "icon": "🧍",
+          "color": "#4ECDC4",
+          "subcategories": {
+            "anatomy": {
+              "name": "Anatomy",
+              "description": "Basic anatomical characteristics",
+              "icon": "⚕️",
+              "color": "#45B7D1"
+            },
+            "transformation": {
+              "name": "Transformation",
+              "description": "Body transformation effects",
+              "icon": "🔄",
+              "color": "#96CEB4"
+            }
+          }
+        },
+        "clothing": {
+          "name": "Clothing",
+          "description": "Clothing and fashion accessories",
+          "icon": "👗",
+          "color": "#FFEAA7",
+          "subcategories": {
+            "outfit": {
+              "name": "Outfit",
+              "description": "Complete clothing ensembles",
+              "icon": "👔",
+              "color": "#DDA0DD"
+            },
+            "accessories": {
+              "name": "Accessories",
+              "description": "Jewelry, bags, and other accessories",
+              "icon": "💍",
+              "color": "#F0E68C"
+            }
+          }
+        },
+        "features": {
+          "name": "Features",
+          "description": "Facial and body features",
+          "icon": "😊",
+          "color": "#FFB6C1",
+          "subcategories": {
+            "hair": {
+              "name": "Hair",
+              "description": "Hair color, style, and length",
+              "icon": "💇",
+              "color": "#8B4513"
+            },
+            "eyes": {
+              "name": "Eyes",
+              "description": "Eye color and shape",
+              "icon": "👀",
+              "color": "#87CEEB"
+            },
+            "skin": {
+              "name": "Skin",
+              "description": "Skin tone and texture",
+              "icon": "🎨",
+              "color": "#F5DEB3"
+            }
+          }
+        }
+      }
+    },
+    "identity": {
+      "name": "Identity",
+      "description": "Personal identity and characteristics",
+      "icon": "🆔",
+      "color": "#9370DB",
+      "subcategories": {
+        "gender": {
+          "name": "Gender",
+          "description": "Gender identity and expression",
+          "icon": "⚧️",
+          "color": "#FF69B4"
+        },
+        "species": {
+          "name": "Species",
+          "description": "Human, animal, or fantastical species",
+          "icon": "🧬",
+          "color": "#32CD32"
+        },
+        "personality": {
+          "name": "Personality",
+          "description": "Personality traits and characteristics",
+          "icon": "🎭",
+          "color": "#FFD700"
+        }
+      }
+    },
+    "status": {
+      "name": "Status",
+      "description": "Current status and conditions",
+      "icon": "📊",
+      "color": "#FF7F50",
+      "subcategories": {
+        "mental": {
+          "name": "Mental",
+          "description": "Mental state and conditions",
+          "icon": "🧠",
+          "color": "#DA70D6"
+        },
+        "physical": {
+          "name": "Physical",
+          "description": "Physical conditions and states",
+          "icon": "💪",
+          "color": "#FF6347"
+        },
+        "magical": {
+          "name": "Magical",
+          "description": "Magical abilities and effects",
+          "icon": "✨",
+          "color": "#9370DB"
+        }
+      }
+    },
+    "environment": {
+      "name": "Environment",
+      "description": "Environmental and contextual tags",
+      "icon": "🌍",
+      "color": "#228B22",
+      "subcategories": {
+        "location": {
+          "name": "Location",
+          "description": "Scene location and setting",
+          "icon": "📍",
+          "color": "#20B2AA"
+        },
+        "time": {
+          "name": "Time",
+          "description": "Time of day or period",
+          "icon": "🕐",
+          "color": "#4169E1"
+        },
+        "weather": {
+          "name": "Weather",
+          "description": "Weather conditions and atmosphere",
+          "icon": "🌤️",
+          "color": "#87CEEB"
+        }
+      }
+    }
+  },
+  "metadata": {
+    "totalCategories": 13,
+    "maxDepth": 3,
+    "lastUpdated": "2025-01-04T00:00:00Z"
+  }
+}

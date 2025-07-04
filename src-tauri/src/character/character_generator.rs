@@ -7,6 +7,7 @@ use tauri::AppHandle;
 use tauri::Manager;
 use uuid::Uuid;
 use base64::{Engine as _, engine::general_purpose};
+use chrono;
 
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -51,12 +52,59 @@ pub async fn generate_character(
     }
 }
 
+fn replace_template_placeholders(workflow: &mut Value, state: &CharacterGenerationState) -> Result<(), String> {
+    // Log the character prompt being used for this generation
+    println!("[PROMPT] Character attributes: {}", state.positive_prompt);
+    println!("[PROMPT] Generation mode: {:?}", state.generation_mode);
+    
+    // Recursively traverse the workflow JSON to find and replace template placeholders
+    replace_placeholders_recursive(workflow, state);
+    Ok(())
+}
+
+fn replace_placeholders_recursive(value: &mut Value, state: &CharacterGenerationState) {
+    match value {
+        Value::String(s) => {
+            // Replace __DYNAMIC_PROMPT__ with the actual character prompt
+            if s.contains("__DYNAMIC_PROMPT__") {
+                *s = s.replace("__DYNAMIC_PROMPT__", &state.positive_prompt);
+            }
+            
+            // Replace __BACKGROUND_PROMPT__ based on context
+            if s.contains("__BACKGROUND_PROMPT__") {
+                let background = match state.context.as_deref() {
+                    Some("character_creation") => "simple gradient background, vignetting",
+                    // Future: Add other contexts like "gameplay" with rich backgrounds
+                    _ => "simple gradient background" // Default fallback
+                };
+                *s = s.replace("__BACKGROUND_PROMPT__", background);
+            }
+            
+            // Future: Add more placeholder replacements here for tag system
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                replace_placeholders_recursive(item, state);
+            }
+        }
+        Value::Object(obj) => {
+            for (_, v) in obj {
+                replace_placeholders_recursive(v, state);
+            }
+        }
+        _ => {} // Numbers, booleans, null don't need replacement
+    }
+}
+
 fn update_workflow_json(workflow: &mut Value, state: &CharacterGenerationState) -> Result<(), String> {
+    // First, replace template placeholders in the workflow JSON
+    replace_template_placeholders(workflow, state)?;
+    
     // Determine the integer value for the switch based on the generation mode
     let switch_value = match state.generation_mode {
         GenerationMode::FaceFromPrompt => 1,
-        GenerationMode::BodyFromPrompt => 2,
-        GenerationMode::RegenerateFace => 3,
+        GenerationMode::RegenerateFace => 2,
+        GenerationMode::BodyFromPrompt => 3,
         GenerationMode::RegenerateBody => 4,
         GenerationMode::ClothingFromPrompt => 5,
     };
@@ -64,30 +112,28 @@ fn update_workflow_json(workflow: &mut Value, state: &CharacterGenerationState) 
     // Update the 'select' input of the ImpactSwitch node (ID 95)
     update_node_input(workflow, "95", "select", switch_value)?;
 
-    // Update prompts and image inputs based on the mode
+    // Update image inputs based on the mode (prompts now handled by template system)
     match state.generation_mode {
         GenerationMode::FaceFromPrompt => {
-            update_node_input(workflow, "4", "text", state.positive_prompt.clone())?;
-            update_node_input(workflow, "7", "text", state.negative_prompt.clone())?;
+            // Template system handles all prompts - no overrides needed
         }
         GenerationMode::BodyFromPrompt | GenerationMode::RegenerateBody => {
+            // Only update image filename - template system handles prompts
             if let Some(filename) = &state.base_face_image_filename {
                 update_node_input(workflow, "303", "image", filename.clone())?;
             }
-            update_node_input(workflow, "37", "text", state.positive_prompt.clone())?;
-            update_node_input(workflow, "38", "text", state.negative_prompt.clone())?;
         }
         GenerationMode::RegenerateFace => {
-             if let Some(filename) = &state.base_face_image_filename {
+            // Only update image filename - template system handles prompts
+            if let Some(filename) = &state.base_face_image_filename {
                 update_node_input(workflow, "303", "image", filename.clone())?;
             }
         }
         GenerationMode::ClothingFromPrompt => {
+            // Only update image filename - template system handles prompts
             if let Some(filename) = &state.base_body_image_filename {
                 update_node_input(workflow, "82", "image", filename.clone())?;
             }
-            update_node_input(workflow, "65", "text", state.positive_prompt.clone())?;
-            update_node_input(workflow, "70", "text", state.negative_prompt.clone())?;
         }
     }
 
@@ -106,6 +152,39 @@ fn update_workflow_json(workflow: &mut Value, state: &CharacterGenerationState) 
         }
     }
 
+    // Update SaveImage node (335) with custom filename and subfolder
+    if let Some(save_node) = workflow.get_mut("335") {
+        if let Some(inputs) = save_node.get_mut("inputs") {
+            // Generate timestamp for unique filenames
+            let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+            
+            // Determine image type based on generation mode
+            let image_type = match state.generation_mode {
+                GenerationMode::FaceFromPrompt | GenerationMode::RegenerateFace => "face",
+                GenerationMode::BodyFromPrompt | GenerationMode::RegenerateBody => "body",
+                GenerationMode::ClothingFromPrompt => "clothing",
+            };
+            
+            // Get character ID or use "unknown"
+            let character_id = state.character_id.as_deref().unwrap_or("unknown");
+            
+            // Ensure output directory structure exists
+            ensure_character_output_directories(character_id, image_type)?;
+            
+            // Create subfolder path with filename: characters/{characterId}/{imageType}/{characterId}_{imageType}_{seed}_{timestamp}
+            let filename_with_path = format!("characters/{}/{}/{}_{}_{}_{}", 
+                character_id,
+                image_type,
+                character_id,
+                image_type,
+                state.seed,
+                timestamp
+            );
+            
+            inputs["filename_prefix"] = filename_with_path.into();
+        }
+    }
+
     Ok(())
 }
 
@@ -115,6 +194,40 @@ fn update_node_input<T: Into<Value>>(workflow: &mut Value, node_id: &str, input_
         .and_then(|node| node.get_mut("inputs"))
         .map(|inputs| inputs[input_name] = value.into())
         .ok_or_else(|| format!("Failed to update input '{}' for node '{}'", input_name, node_id))
+}
+
+fn ensure_character_output_directories(character_id: &str, image_type: &str) -> Result<(), String> {
+    // Get ComfyUI output directory path using the same logic as get_image_as_data_url
+    let comfyui_dir = if cfg!(debug_assertions) {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .ok_or("Failed to get parent of CARGO_MANIFEST_DIR")?
+            .join("target")
+            .join("debug")
+            .join("vendor")
+            .join("comfyui")
+    } else {
+        let exe_path = std::env::current_exe()
+            .map_err(|e| format!("Failed to get current executable path: {}", e))?;
+        let exe_dir = exe_path.parent()
+            .ok_or_else(|| format!("Failed to get parent directory of executable: {}", exe_path.display()))?;
+        let target_dir = exe_dir.parent()
+            .ok_or_else(|| format!("Failed to get target directory from executable path: {}", exe_dir.display()))?;
+        target_dir.join("vendor").join("comfyui")
+    };
+
+    // Create the character-specific directory structure
+    let character_output_dir = comfyui_dir
+        .join("output")
+        .join("characters")
+        .join(character_id)
+        .join(image_type);
+
+    // Create directories recursively
+    fs::create_dir_all(&character_output_dir)
+        .map_err(|e| format!("Failed to create character output directory {}: {}", character_output_dir.display(), e))?;
+
+    Ok(())
 }
 
 #[tauri::command]

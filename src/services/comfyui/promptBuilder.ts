@@ -1,12 +1,58 @@
 import { invoke } from '@tauri-apps/api/core'; // For calling Tauri commands
-import { CharacterAttributes, Tag } from '../../types/character';
+import { CharacterAttributes, LegacyTag } from '../../types/character';
+import { Tag } from '../../types/tags';
+import { tagService } from '../tags/tagService';
+
+/**
+ * Process tags for prompt generation with priority sorting and deduplication
+ */
+async function processTagsForPrompt(tags: Tag[] | LegacyTag[] | string[]): Promise<string[]> {
+  if (!tags || tags.length === 0) {
+    return [];
+  }
+
+  let processedTags: string[] = [];
+
+  // Handle different tag formats
+  if (typeof tags[0] === 'string') {
+    // Array of tag IDs
+    const tagIds = tags as string[];
+    const tagObjects = tagService.getTags(tagIds);
+    
+    // Sort by priority (higher first) and use danbooru_tag or name
+    const sortedTags = tagObjects.sort((a, b) => b.priority - a.priority);
+    processedTags = sortedTags.map(tag => tag.danbooru_tag || tag.name);
+    
+  } else {
+    // Array of tag objects (legacy or new)
+    const tagObjects = tags as (Tag | LegacyTag)[];
+    
+    if ('priority' in tagObjects[0]) {
+      // New tag system
+      const newTags = tagObjects as Tag[];
+      const sortedTags = newTags.sort((a, b) => b.priority - a.priority);
+      processedTags = sortedTags.map(tag => tag.danbooru_tag || tag.name);
+    } else {
+      // Legacy tag system
+      const legacyTags = tagObjects as LegacyTag[];
+      processedTags = legacyTags.map(tag => tag.name);
+    }
+  }
+
+  // Remove duplicates and filter out system tags
+  const uniqueTags = [...new Set(processedTags)]
+    .filter(tag => tag && tag.trim() !== '')
+    .filter(tag => !tag.startsWith('_')); // Filter out system tags
+
+  return uniqueTags;
+}
 
 /**
  * Generates the ComfyUI prompt payload based on character data and workflow type.
  */
 export async function generateComfyUIPromptPayload(
   characterData: CharacterAttributes,
-  tags: Tag[],
+  tags: Tag[] | LegacyTag[] | string[], // Support multiple tag formats
   workflowType: "face" | "fullbody" | "fullbody_detailer",
   selectedFaceFilename?: string | null,
   selectedFaceSubfolder?: string | null
@@ -52,17 +98,34 @@ export async function generateComfyUIPromptPayload(
     // --- Construct dynamic prompt parts ---
     const promptParts: string[] = [];
 
-    if (characterData.anatomy?.toLowerCase() === "male") {
-      promptParts.push("1boy");
-    } else if (characterData.anatomy?.toLowerCase() === "female") {
-      promptParts.push("1girl");
-    }
-
+    // Use enhanced gender expression logic (0=masculine, 100=feminine)
     if (characterData.genderExpression !== undefined) {
       const expression = characterData.genderExpression;
-      if (expression <= -3) promptParts.push("masculine");
-      else if (expression <= 2) promptParts.push("androgynous");
-      else promptParts.push("feminine");
+      console.log(`[PromptBuilder] DEBUG: genderExpression=${expression}, anatomy=${characterData.anatomy}`);
+      
+      if (characterData.anatomy === 'Male') {
+        if (expression > 66) {
+          console.log(`[PromptBuilder] Adding: 1boy, feminine (expression=${expression})`);
+          promptParts.push("1boy", "feminine");
+        } else if (expression < 33) {
+          console.log(`[PromptBuilder] Adding: 1boy, masculine (expression=${expression})`);
+          promptParts.push("1boy", "masculine");
+        } else {
+          console.log(`[PromptBuilder] Adding: 1boy, androgynous (expression=${expression})`);
+          promptParts.push("1boy", "androgynous");
+        }
+      } else if (characterData.anatomy === 'Female') {
+        if (expression > 66) {
+          console.log(`[PromptBuilder] Adding: 1girl, feminine (expression=${expression})`);
+          promptParts.push("1girl", "feminine");
+        } else if (expression < 33) {
+          console.log(`[PromptBuilder] Adding: 1girl, masculine (expression=${expression})`);
+          promptParts.push("1girl", "masculine");
+        } else {
+          console.log(`[PromptBuilder] Adding: 1girl, androgynous (expression=${expression})`);
+          promptParts.push("1girl", "androgynous");
+        }
+      }
     }
     
     if (characterData.ethnicity) promptParts.push(characterData.ethnicity);
@@ -73,9 +136,9 @@ export async function generateComfyUIPromptPayload(
       if (characterData.bodyType) promptParts.push(characterData.bodyType + " body type");
     }
     
-    tags.forEach(tag => {
-      promptParts.push(tag.name);
-    });
+    // Enhanced tag processing with priority support
+    const processedTags = await processTagsForPrompt(tags);
+    promptParts.push(...processedTags);
 
     const dynamicPromptContent = promptParts.filter(part => part.trim() !== "").join(", ");
 

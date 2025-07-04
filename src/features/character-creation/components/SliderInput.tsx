@@ -19,10 +19,10 @@ const SliderInput: React.FC<SliderInputProps> = ({ label, value, onChange, min, 
     // This function is specific to the Gender Expression slider.
     // Consider making this more generic if other sliders need such labels.
     if (label === "Gender Expression") { // Only apply special labels for Gender Expression
-      // Assuming slider range is -10 to 10 based on AttributeInputForm.tsx
-      if (currentValue <= -3) return "Masculine"; // e.g., -10 to -3
-      if (currentValue <= 2) return "Androgynous";  // e.g., -2 to 2
-      return "Feminine"; // e.g., 3 to 10
+      // Slider range is 0 to 100 (0=masculine, 100=feminine)
+      if (currentValue < 33) return "Masculine"; // 0-32
+      if (currentValue <= 66) return "Androgynous";  // 33-66
+      return "Feminine"; // 67-100
     }
     return currentValue.toString(); // Default: show numeric value
   };

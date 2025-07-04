@@ -18,8 +18,8 @@ async function runGeneration(generationState: CharacterGenerationState) {
     setError(null);
 
     try {
-        // The full state, including the workflow JSON, is passed directly to the backend.
-        console.log("Generation State being sent to Rust:", JSON.stringify(generationState, null, 2));
+        // Log only the essential generation info (not the massive workflow JSON)
+        console.log(`[GENERATION] Mode: ${generationState.generationMode}, Prompt: "${generationState.positivePrompt}", Seed: ${generationState.seed}`);
         const response = await invoke<GenerationResponse>('generate_character', { state: generationState });
         
         createWebSocketManager({
@@ -39,6 +39,7 @@ export async function generateFace(attributes: CharacterAttributes, negativeProm
     characterStateService.setLastGenerationMode(GenerationMode.FaceFromPrompt);
     const optimalSettings = characterStateService.get_optimal_workflow_settings();
     const workflowString = await invoke<string>('get_unified_workflow');
+    const { characterId } = useCharacterStore.getState();
 
     const generationState: CharacterGenerationState = {
         workflowJson: workflowString,
@@ -53,6 +54,8 @@ export async function generateFace(attributes: CharacterAttributes, negativeProm
         denoise: 1.0,
         baseFaceImageFilename: null,
         baseBodyImageFilename: null,
+        characterId: characterId,
+        context: "character_creation",
     };
 
     await runGeneration(generationState);
@@ -63,6 +66,7 @@ export async function generateBodyFromPrompt(baseFaceImageFilename: string, attr
     const optimalSettings = characterStateService.get_optimal_workflow_settings();
     const workflowString = await invoke<string>('get_unified_workflow');
     const negativePrompt = "bad quality, worst quality, deformed, ugly, disfigured, missing limbs";
+    const { characterId } = useCharacterStore.getState();
 
     const generationState: CharacterGenerationState = {
         workflowJson: workflowString,
@@ -77,6 +81,8 @@ export async function generateBodyFromPrompt(baseFaceImageFilename: string, attr
         denoise: 1.0,
         baseFaceImageFilename: baseFaceImageFilename,
         baseBodyImageFilename: null,
+        characterId: characterId,
+        context: "character_creation",
     };
 
     await runGeneration(generationState);

@@ -10,7 +10,7 @@ const AttributeInputForm: React.FC = () => {
   const [name, setName] = useState('Player');
   const { setCharacterAttribute } = useCharacterStore(); // Removed setLoading and setError as they are not used here
   const [anatomy, setAnatomy] = useState('');
-  const [genderExpression, setGenderExpression] = useState(0);
+  const [genderExpression, setGenderExpression] = useState(50);
   const [ethnicity, setEthnicity] = useState('');
   const [hairColor, setHairColor] = useState('');
   const [eyeColor, setEyeColor] = useState('');
@@ -133,8 +133,8 @@ const AttributeInputForm: React.FC = () => {
       />
       <SliderInput
         label="Gender Expression"
-        min={-10}
-        max={10}
+        min={0}
+        max={100}
         step={1}
         value={genderExpression}
         onChange={handleGenderExpressionChange}

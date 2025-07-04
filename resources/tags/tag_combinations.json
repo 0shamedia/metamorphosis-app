@@ -1,0 +1,110 @@
+{
+  "version": "1.0.0",
+  "description": "Predefined tag combinations with special effects",
+  "combinations": [
+    {
+      "id": "elegant_feminine",
+      "name": "Elegant Feminine",
+      "description": "A refined and graceful feminine presentation",
+      "tagIds": ["feminine", "long_hair", "confident"],
+      "effects": [
+        {
+          "type": "immediate",
+          "target": "visual",
+          "operation": "add",
+          "magnitude": 25,
+          "description": "Combines effects for elegant appearance"
+        }
+      ],
+      "rarity": "uncommon",
+      "unlockConditions": [
+        {
+          "type": "tag",
+          "condition": "has_all_tags",
+          "description": "Automatically unlocked when all required tags are present"
+        }
+      ],
+      "discoverable": true
+    },
+    {
+      "id": "athletic_confidence",
+      "name": "Athletic Confidence",
+      "description": "The natural confidence that comes from physical fitness",
+      "tagIds": ["athletic", "confident", "strong"],
+      "effects": [
+        {
+          "type": "immediate",
+          "target": "visual",
+          "operation": "add",
+          "magnitude": 30,
+          "description": "Enhances physical presence and posture"
+        }
+      ],
+      "rarity": "uncommon",
+      "unlockConditions": [
+        {
+          "type": "tag",
+          "condition": "has_all_tags",
+          "description": "Automatically unlocked when all required tags are present"
+        }
+      ],
+      "discoverable": true
+    },
+    {
+      "id": "shy_cute",
+      "name": "Shy Cuteness",
+      "description": "An endearing combination of shyness and cuteness",
+      "tagIds": ["shy", "cute", "innocent"],
+      "effects": [
+        {
+          "type": "immediate",
+          "target": "visual",
+          "operation": "add",
+          "magnitude": 20,
+          "description": "Creates an especially endearing appearance"
+        }
+      ],
+      "rarity": "uncommon",
+      "unlockConditions": [
+        {
+          "type": "tag",
+          "condition": "has_all_tags",
+          "description": "Automatically unlocked when all required tags are present"
+        }
+      ],
+      "discoverable": true
+    },
+    {
+      "id": "magical_transformation_adept",
+      "name": "Transformation Adept",
+      "description": "Master of magical transformation abilities",
+      "tagIds": ["magical_transformation", "confident", "experienced"],
+      "effects": [
+        {
+          "type": "conditional",
+          "target": "gameplay",
+          "operation": "multiply",
+          "magnitude": 2,
+          "condition": "in_transformation_scene",
+          "description": "Doubles transformation options and success rates"
+        }
+      ],
+      "rarity": "legendary",
+      "unlockConditions": [
+        {
+          "type": "custom",
+          "condition": "completed_transformation_training",
+          "description": "Must complete advanced transformation training",
+          "hidden": true
+        }
+      ],
+      "discoverable": false
+    }
+  ],
+  "metadata": {
+    "totalCombinations": 4,
+    "discoverable": 3,
+    "hidden": 1,
+    "lastUpdated": "2025-01-04T00:00:00Z"
+  }
+}

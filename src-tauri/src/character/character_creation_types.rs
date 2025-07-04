@@ -27,4 +27,8 @@ pub struct CharacterGenerationState {
     pub base_face_image_filename: Option<String>,
     #[serde(default)]
     pub base_body_image_filename: Option<String>,
+    #[serde(default)]
+    pub character_id: Option<String>,
+    #[serde(default)]
+    pub context: Option<String>,
 }

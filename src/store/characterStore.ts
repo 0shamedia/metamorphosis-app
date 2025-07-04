@@ -1,6 +1,9 @@
 import { create } from 'zustand';
-import { CharacterAttributes, Tag, ImageOption } from '../types/character';
+import { CharacterAttributes, ImageOption } from '../types/character';
+import { Tag, TagHistory } from '../types/tags';
 import { GenerationMode } from '../types/generation';
+import { useTagStore } from './tagStore';
+import tagEffectService from '../services/tags/tagEffectService';
 
 export type CharacterCreationStep = 'attributes' | 'faceSelection' | 'bodySelection' | 'finalized';
 
@@ -18,7 +21,9 @@ export interface GenerationProgress {
 
 interface CharacterState {
   attributes: CharacterAttributes;
-  tags: Tag[];
+  tags: Tag[]; // Legacy - keeping for backward compatibility
+  activeTags: string[]; // New tag system - IDs only
+  tagHistory: TagHistory | null; // Tag acquisition history
   loading: boolean; // General loading, can be used or refactored
   error: string | null;
   characterImageUrl: string | null; // Potentially for the final full body image
@@ -54,7 +59,12 @@ interface CharacterState {
 interface CharacterActions {
   setLivePreviewUrl: (url: string | null) => void;
   setCharacterAttribute: <K extends keyof CharacterAttributes>(attribute: K, value: CharacterAttributes[K]) => void;
-  setTags: (tags: Tag[]) => void;
+  setTags: (tags: Tag[]) => void; // Legacy
+  setActiveTags: (tagIds: string[]) => void; // New tag system
+  setTagHistory: (history: TagHistory | null) => void;
+  addTag: (tagId: string, source?: string) => boolean;
+  removeTag: (tagId: string) => boolean;
+  applyTagEffects: () => void; // Apply tag effects to attributes
   setLoading: (isLoading: boolean) => void;
   setError: (errorMessage: string | null) => void;
   setCharacterImageUrl: (url: string | null) => void;
@@ -105,9 +115,11 @@ const initialAttributes: CharacterAttributes = {
 
 const initialGenerationProgress: GenerationProgress | null = null;
 
-const useCharacterStore = create<CharacterState & CharacterActions>((set) => ({
+const useCharacterStore = create<CharacterState & CharacterActions>((set, get) => ({
   attributes: { ...initialAttributes },
-  tags: [],
+  tags: [], // Legacy
+  activeTags: [], // New tag system
+  tagHistory: null,
   loading: false,
   error: null,
   characterImageUrl: null,
@@ -138,14 +150,127 @@ const useCharacterStore = create<CharacterState & CharacterActions>((set) => ({
  
   setCharacterId: (characterId) => set(() => ({ characterId })),
   setLivePreviewUrl: (url) => set(() => ({ livePreviewUrl: url })),
-  setCharacterAttribute: (attribute, value) =>
+  setCharacterAttribute: (attribute, value) => {
     set((state) => ({
       attributes: {
         ...state.attributes,
         [attribute]: value,
       },
-    })),
-  setTags: (tags) => set(() => ({ tags })),
+    }));
+    
+    // Auto-assign appropriate tags based on attribute changes
+    const { activeTags, attributes } = get();
+    const newAttributes = { ...attributes, [attribute]: value };
+    
+    // Auto-tag anatomy moved to face confirmation step instead of immediate application
+    // This prevents premature tag application when user might change their mind
+    
+    // Apply any pending tag effects
+    setTimeout(() => get().applyTagEffects(), 0);
+  },
+  
+  setTags: (tags) => set(() => ({ tags })), // Legacy support
+  
+  setActiveTags: (tagIds) => {
+    set(() => ({ activeTags: tagIds }));
+    // Sync with tag store
+    setTimeout(() => {
+      const tagStore = useTagStore.getState();
+      tagStore.loadFromCharacter(tagIds, get().tagHistory || undefined);
+    }, 0);
+  },
+  
+  setTagHistory: (history) => set(() => ({ tagHistory: history })),
+  
+  addTag: (tagId, source = 'manual') => {
+    const state = get();
+    
+    // Check if tag already exists
+    if (state.activeTags.includes(tagId)) {
+      return false;
+    }
+    
+    try {
+      // Use tag store for validation
+      const tagStore = useTagStore.getState();
+      const success = tagStore.addTag(tagId, source);
+      
+      if (success) {
+        set((state) => ({
+          activeTags: [...state.activeTags, tagId]
+        }));
+        
+        // Apply tag effects
+        get().applyTagEffects();
+        return true;
+      }
+    } catch (error) {
+      console.warn('Failed to add tag:', tagId, error);
+    }
+    
+    return false;
+  },
+  
+  removeTag: (tagId) => {
+    const state = get();
+    
+    if (!state.activeTags.includes(tagId)) {
+      return false;
+    }
+    
+    // Use tag store for removal
+    const tagStore = useTagStore.getState();
+    const success = tagStore.removeTag(tagId);
+    
+    if (success) {
+      set((state) => ({
+        activeTags: state.activeTags.filter(id => id !== tagId)
+      }));
+      
+      // Apply remaining tag effects
+      get().applyTagEffects();
+      return true;
+    }
+    
+    return false;
+  },
+  
+  applyTagEffects: () => {
+    const { activeTags, attributes } = get();
+    
+    if (activeTags.length === 0) {
+      return;
+    }
+    
+    try {
+      const context = {
+        character: attributes,
+        activeTags,
+        scene: 'character_creation',
+        timestamp: new Date(),
+        metadata: {}
+      };
+      
+      const effects = tagEffectService.calculateEffects(activeTags, context);
+      
+      // Apply attribute changes
+      if (Object.keys(effects.attributeChanges).length > 0) {
+        set((state) => ({
+          attributes: {
+            ...state.attributes,
+            ...effects.attributeChanges
+          }
+        }));
+      }
+      
+      // Update tag store with calculated effects
+      const tagStore = useTagStore.getState();
+      tagStore.calculateEffects(attributes);
+      
+    } catch (error) {
+      console.error('Failed to apply tag effects:', error);
+    }
+  },
   setLoading: (isLoading) => set(() => ({ loading: isLoading })),
   setError: (errorMessage) => set(() => ({ error: errorMessage })),
   setCharacterImageUrl: (url) => set(() => ({ characterImageUrl: url })),
@@ -206,30 +331,38 @@ const useCharacterStore = create<CharacterState & CharacterActions>((set) => ({
     return {};
   }),
 
-  resetCreationState: () => set(() => ({
-    attributes: { ...initialAttributes },
-    tags: [],
-    creationStep: 'attributes',
-    faceOptions: [],
-    selectedFace: null,
-    isGeneratingFace: false,
-    fullBodyOptions: [],
-    selectedFullBody: null,
-    isGeneratingFullBody: false,
-    characterImageUrl: null,
-    error: null,
-    clientId: null,
-    generationProgress: initialGenerationProgress,
-    characterId: null,
-    savedFaceImagePath: null,
-    savedBodyImagePath: null,
-    faceSeed: null,
-    bodySeed: null,
-    latestImageBlob: null,
-    latestImageUrl: null,
-    lastGenerationMode: null,
-    livePreviewUrl: null,
-  })),
+  resetCreationState: () => {
+    set(() => ({
+      attributes: { ...initialAttributes },
+      tags: [], // Legacy
+      activeTags: [], // Clear new tag system
+      tagHistory: null,
+      creationStep: 'attributes',
+      faceOptions: [],
+      selectedFace: null,
+      isGeneratingFace: false,
+      fullBodyOptions: [],
+      selectedFullBody: null,
+      isGeneratingFullBody: false,
+      characterImageUrl: null,
+      error: null,
+      clientId: null,
+      generationProgress: initialGenerationProgress,
+      characterId: null,
+      savedFaceImagePath: null,
+      savedBodyImagePath: null,
+      faceSeed: null,
+      bodySeed: null,
+      latestImageBlob: null,
+      latestImageUrl: null,
+      lastGenerationMode: null,
+      livePreviewUrl: null,
+    }));
+    
+    // Clear tag store as well
+    const tagStore = useTagStore.getState();
+    tagStore.clearAllTags();
+  },
 }));
 
 export default useCharacterStore;

@@ -1,0 +1,507 @@
+{
+  "version": "1.0.0",
+  "description": "Core tags for the Metamorphosis transformation system",
+  "tags": [
+    {
+      "id": "feminine",
+      "name": "Feminine",
+      "description": "Expressing feminine characteristics and appearance",
+      "category": "identity.gender",
+      "subcategories": ["expression", "appearance"],
+      "danbooru_tag": "feminine",
+      "aliases": ["fem", "girly", "womanly"],
+      "priority": 85,
+      "rarity": "common",
+      "relationships": [
+        {
+          "type": "conflicts",
+          "tagIds": ["masculine", "completely_masculine"],
+          "description": "Cannot be both feminine and masculine simultaneously"
+        },
+        {
+          "type": "synergizes",
+          "tagIds": ["long_hair", "makeup", "dress"],
+          "strength": 75
+        }
+      ],
+      "effects": [
+        {
+          "type": "immediate",
+          "target": "attribute",
+          "operation": "add",
+          "magnitude": 15,
+          "targetAttribute": "genderExpression",
+          "description": "Increases feminine expression"
+        }
+      ],
+      "modifiers": [],
+      "unlockConditions": [
+        {
+          "type": "attribute",
+          "condition": "genderExpression >= 60",
+          "description": "Available when gender expression is feminine-leaning"
+        }
+      ],
+      "source": "core",
+      "version": "1.0.0",
+      "icon": "♀",
+      "color": "#FF69B4"
+    },
+    {
+      "id": "masculine",
+      "name": "Masculine",
+      "description": "Expressing masculine characteristics and appearance",
+      "category": "identity.gender",
+      "subcategories": ["expression", "appearance"],
+      "danbooru_tag": "masculine",
+      "aliases": ["masc", "manly", "masculine_expression"],
+      "priority": 85,
+      "rarity": "common",
+      "relationships": [
+        {
+          "type": "conflicts",
+          "tagIds": ["feminine", "completely_feminine"],
+          "description": "Cannot be both masculine and feminine simultaneously"
+        },
+        {
+          "type": "synergizes",
+          "tagIds": ["short_hair", "muscular", "beard"],
+          "strength": 75
+        }
+      ],
+      "effects": [
+        {
+          "type": "immediate",
+          "target": "attribute",
+          "operation": "add",
+          "magnitude": -15,
+          "targetAttribute": "genderExpression",
+          "description": "Decreases feminine expression (increases masculine)"
+        }
+      ],
+      "modifiers": [],
+      "unlockConditions": [
+        {
+          "type": "attribute",
+          "condition": "genderExpression <= 40",
+          "description": "Available when gender expression is masculine-leaning"
+        }
+      ],
+      "source": "core",
+      "version": "1.0.0",
+      "icon": "♂",
+      "color": "#4169E1"
+    },
+    {
+      "id": "androgynous",
+      "name": "Androgynous",
+      "description": "Balanced mix of masculine and feminine characteristics",
+      "category": "identity.gender",
+      "subcategories": ["expression", "balance"],
+      "danbooru_tag": "androgynous",
+      "aliases": ["andro", "neutral", "balanced"],
+      "priority": 70,
+      "rarity": "uncommon",
+      "relationships": [
+        {
+          "type": "conflicts",
+          "tagIds": ["completely_masculine", "completely_feminine"],
+          "description": "Cannot be completely gendered and androgynous"
+        }
+      ],
+      "effects": [
+        {
+          "type": "immediate",
+          "target": "attribute",
+          "operation": "set",
+          "magnitude": 50,
+          "targetAttribute": "genderExpression",
+          "description": "Sets gender expression to neutral"
+        }
+      ],
+      "modifiers": [],
+      "unlockConditions": [
+        {
+          "type": "attribute",
+          "condition": "genderExpression >= 40 && genderExpression <= 60",
+          "description": "Available when gender expression is balanced"
+        }
+      ],
+      "source": "core",
+      "version": "1.0.0",
+      "icon": "⚧",
+      "color": "#9370DB"
+    },
+    {
+      "id": "long_hair",
+      "name": "Long Hair",
+      "description": "Hair that extends past the shoulders",
+      "category": "appearance.features.hair",
+      "subcategories": ["style", "length"],
+      "danbooru_tag": "long_hair",
+      "aliases": ["longhair", "flowing_hair"],
+      "priority": 60,
+      "rarity": "common",
+      "relationships": [
+        {
+          "type": "conflicts",
+          "tagIds": ["short_hair", "bald"],
+          "description": "Cannot have both long and short hair"
+        },
+        {
+          "type": "synergizes",
+          "tagIds": ["feminine", "elegant", "flowing"],
+          "strength": 60
+        }
+      ],
+      "effects": [],
+      "modifiers": [],
+      "unlockConditions": [
+        {
+          "type": "custom",
+          "condition": "always_available",
+          "description": "Always available during character creation"
+        }
+      ],
+      "source": "core",
+      "version": "1.0.0",
+      "color": "#8B4513"
+    },
+    {
+      "id": "short_hair",
+      "name": "Short Hair",
+      "description": "Hair that is cut above the shoulders",
+      "category": "appearance.features.hair",
+      "subcategories": ["style", "length"],
+      "danbooru_tag": "short_hair",
+      "aliases": ["shorthair", "cropped_hair"],
+      "priority": 60,
+      "rarity": "common",
+      "relationships": [
+        {
+          "type": "conflicts",
+          "tagIds": ["long_hair", "very_long_hair"],
+          "description": "Cannot have both short and long hair"
+        },
+        {
+          "type": "synergizes",
+          "tagIds": ["masculine", "practical", "athletic"],
+          "strength": 50
+        }
+      ],
+      "effects": [],
+      "modifiers": [],
+      "unlockConditions": [
+        {
+          "type": "custom",
+          "condition": "always_available",
+          "description": "Always available during character creation"
+        }
+      ],
+      "source": "core",
+      "version": "1.0.0",
+      "color": "#8B4513"
+    },
+    {
+      "id": "athletic",
+      "name": "Athletic",
+      "description": "Well-toned and physically fit appearance",
+      "category": "appearance.body",
+      "subcategories": ["build", "fitness"],
+      "danbooru_tag": "athletic",
+      "aliases": ["fit", "toned", "muscular"],
+      "priority": 70,
+      "rarity": "common",
+      "relationships": [
+        {
+          "type": "conflicts",
+          "tagIds": ["overweight", "frail"],
+          "description": "Cannot be both athletic and overweight/frail"
+        },
+        {
+          "type": "synergizes",
+          "tagIds": ["strong", "confident", "active"],
+          "strength": 80
+        }
+      ],
+      "effects": [
+        {
+          "type": "immediate",
+          "target": "visual",
+          "operation": "set",
+          "magnitude": 1,
+          "description": "Enhances physical appearance in generation"
+        }
+      ],
+      "modifiers": [
+        {
+          "attribute": "bodyType",
+          "operation": "set",
+          "value": "Athletic",
+          "temporary": false
+        }
+      ],
+      "unlockConditions": [
+        {
+          "type": "attribute",
+          "condition": "bodyType === 'Athletic'",
+          "description": "Available when body type is athletic"
+        }
+      ],
+      "source": "core",
+      "version": "1.0.0",
+      "icon": "💪",
+      "color": "#FF6347"
+    },
+    {
+      "id": "curvy",
+      "name": "Curvy",
+      "description": "Pronounced curves and feminine body shape",
+      "category": "appearance.body",
+      "subcategories": ["shape", "curves"],
+      "danbooru_tag": "curvy",
+      "aliases": ["curvaceous", "voluptuous", "shapely"],
+      "priority": 75,
+      "rarity": "common",
+      "relationships": [
+        {
+          "type": "synergizes",
+          "tagIds": ["feminine", "confident", "attractive"],
+          "strength": 85
+        }
+      ],
+      "effects": [
+        {
+          "type": "immediate",
+          "target": "visual",
+          "operation": "add",
+          "magnitude": 20,
+          "description": "Emphasizes curves in generation"
+        }
+      ],
+      "modifiers": [
+        {
+          "attribute": "bodyType",
+          "operation": "set",
+          "value": "Curvy",
+          "temporary": false
+        }
+      ],
+      "unlockConditions": [
+        {
+          "type": "attribute",
+          "condition": "bodyType === 'Curvy'",
+          "description": "Available when body type is curvy"
+        }
+      ],
+      "source": "core",
+      "version": "1.0.0",
+      "icon": "⏳",
+      "color": "#FF1493"
+    },
+    {
+      "id": "confident",
+      "name": "Confident",
+      "description": "Self-assured and bold personality trait",
+      "category": "identity.personality",
+      "subcategories": ["trait", "attitude"],
+      "danbooru_tag": "confident",
+      "aliases": ["self_assured", "bold", "assertive"],
+      "priority": 50,
+      "rarity": "common",
+      "relationships": [
+        {
+          "type": "conflicts",
+          "tagIds": ["shy", "insecure"],
+          "description": "Cannot be both confident and shy"
+        },
+        {
+          "type": "synergizes",
+          "tagIds": ["charismatic", "leadership", "attractive"],
+          "strength": 70
+        }
+      ],
+      "effects": [
+        {
+          "type": "immediate",
+          "target": "visual",
+          "operation": "add",
+          "magnitude": 10,
+          "description": "Affects posture and expression in generation"
+        }
+      ],
+      "modifiers": [],
+      "unlockConditions": [
+        {
+          "type": "choice",
+          "condition": "made_confident_choice",
+          "description": "Unlocked by making confident choices in scenes"
+        }
+      ],
+      "source": "core",
+      "version": "1.0.0",
+      "icon": "✨",
+      "color": "#FFD700"
+    },
+    {
+      "id": "shy",
+      "name": "Shy",
+      "description": "Reserved and introverted personality trait",
+      "category": "identity.personality",
+      "subcategories": ["trait", "attitude"],
+      "danbooru_tag": "shy",
+      "aliases": ["timid", "reserved", "introverted"],
+      "priority": 50,
+      "rarity": "common",
+      "relationships": [
+        {
+          "type": "conflicts",
+          "tagIds": ["confident", "bold"],
+          "description": "Cannot be both shy and confident"
+        },
+        {
+          "type": "synergizes",
+          "tagIds": ["cute", "innocent", "gentle"],
+          "strength": 65
+        }
+      ],
+      "effects": [
+        {
+          "type": "immediate",
+          "target": "visual",
+          "operation": "add",
+          "magnitude": 10,
+          "description": "Affects posture and expression in generation"
+        }
+      ],
+      "modifiers": [],
+      "unlockConditions": [
+        {
+          "type": "choice",
+          "condition": "made_shy_choice",
+          "description": "Unlocked by making shy choices in scenes"
+        }
+      ],
+      "source": "core",
+      "version": "1.0.0",
+      "icon": "🙈",
+      "color": "#FFB6C1"
+    },
+    {
+      "id": "magical_transformation",
+      "name": "Magical Transformation",
+      "description": "Ability to transform through magical means",
+      "category": "status.magical",
+      "subcategories": ["ability", "transformation"],
+      "danbooru_tag": "magical_girl",
+      "aliases": ["magic_user", "shapeshifter", "enchanted"],
+      "priority": 90,
+      "rarity": "rare",
+      "relationships": [
+        {
+          "type": "implies",
+          "tagIds": ["transformation_capable"],
+          "description": "Magical transformation implies general transformation ability"
+        },
+        {
+          "type": "synergizes",
+          "tagIds": ["mysterious", "powerful", "glowing"],
+          "strength": 85
+        }
+      ],
+      "effects": [
+        {
+          "type": "conditional",
+          "target": "gameplay",
+          "operation": "toggle",
+          "magnitude": 1,
+          "condition": "in_transformation_scene",
+          "description": "Unlocks magical transformation options"
+        }
+      ],
+      "modifiers": [],
+      "unlockConditions": [
+        {
+          "type": "tag",
+          "condition": "has_magic_potential",
+          "description": "Requires magical potential to be discovered",
+          "hidden": true
+        }
+      ],
+      "source": "core",
+      "version": "1.0.0",
+      "icon": "✨",
+      "color": "#9370DB"
+    },
+    {
+      "id": "1girl",
+      "name": "Single Girl",
+      "description": "One female character in the scene",
+      "category": "appearance.body.anatomy",
+      "subcategories": ["count", "gender"],
+      "danbooru_tag": "1girl",
+      "aliases": ["one_girl", "solo_female"],
+      "priority": 95,
+      "rarity": "common",
+      "relationships": [
+        {
+          "type": "conflicts",
+          "tagIds": ["1boy", "multiple_girls"],
+          "description": "Cannot be multiple character counts"
+        },
+        {
+          "type": "requires",
+          "tagIds": [],
+          "description": "Base tag for female characters"
+        }
+      ],
+      "effects": [],
+      "modifiers": [],
+      "unlockConditions": [
+        {
+          "type": "attribute",
+          "condition": "anatomy === 'Female'",
+          "description": "Available for female characters"
+        }
+      ],
+      "source": "core",
+      "version": "1.0.0",
+      "hidden": true
+    },
+    {
+      "id": "1boy",
+      "name": "Single Boy",
+      "description": "One male character in the scene",
+      "category": "appearance.body.anatomy",
+      "subcategories": ["count", "gender"],
+      "danbooru_tag": "1boy",
+      "aliases": ["one_boy", "solo_male"],
+      "priority": 95,
+      "rarity": "common",
+      "relationships": [
+        {
+          "type": "conflicts",
+          "tagIds": ["1girl", "multiple_boys"],
+          "description": "Cannot be multiple character counts"
+        },
+        {
+          "type": "requires",
+          "tagIds": [],
+          "description": "Base tag for male characters"
+        }
+      ],
+      "effects": [],
+      "modifiers": [],
+      "unlockConditions": [
+        {
+          "type": "attribute",
+          "condition": "anatomy === 'Male'",
+          "description": "Available for male characters"
+        }
+      ],
+      "source": "core",
+      "version": "1.0.0",
+      "hidden": true
+    }
+  ]
+}

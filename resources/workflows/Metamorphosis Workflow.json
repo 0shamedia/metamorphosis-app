@@ -10,7 +10,7 @@
   },
   "4": {
     "inputs": {
-      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, 3d, rim lighting, portrait, headshot, close-up, adult, BREAK, __DYNAMIC_PROMPT__, BREAK, detailed beautiful eyes, detailed irises, pupils,simple gradient background, vignetting, volumetric lighting, incredibly detailed skin,",
+      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, 3d, rim lighting, portrait, headshot, close-up, adult, BREAK, __DYNAMIC_PROMPT__, BREAK, __BACKGROUND_PROMPT__, detailed beautiful eyes, detailed irises, pupils, vignetting, volumetric lighting, incredibly detailed skin,",
       "parser": "A1111",
       "mean_normalization": true,
       "multi_conditioning": true,
@@ -164,7 +164,7 @@
   },
   "37": {
     "inputs": {
-      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, scenery, 3d, rim lighting, adult, BREAK, __DYNAMIC_PROMPT__, BREAK, detailed beautiful eyes, dramatic shadow, vignetting, volumetric lighting, incredibly detailed skin,",
+      "text": "masterpiece, best quality, amazing quality, 4k, very aesthetic, high resolution, ultra-detailed, absurdres, newest, scenery, 3d, rim lighting, adult, BREAK, __DYNAMIC_PROMPT__, BREAK, __BACKGROUND_PROMPT__, detailed beautiful eyes, dramatic shadow, vignetting, volumetric lighting, incredibly detailed skin,",
       "parser": "A1111",
       "mean_normalization": true,
       "multi_conditioning": true,
